@@ -5,10 +5,17 @@ import ChartWidget from "../src/components/ChartWidget";
 import { ChartLegendPanel } from "../src/components/components/chart-legend-panel";
 import { expandSeriesColors, getThemeColors } from "../src/components/components/recharts-wrapper";
 import type { ChartType, YAxisPlacement } from "../src/types/chart-config";
-import { CHART_TYPE_TO_NAME } from "../src/types/chart-config";
 
-// Mock 데이터 생성
-function generateMockData(count: number) {
+// 모든 차트 타입 (geo-grid 제외 - 특수 데이터 필요)
+const ALL_CHART_TYPES: ChartType[] = [
+  "line", "area", "area-100", "stacked-area", "synced-area",
+  "column", "mixed", "stacked", "stacked-100", "stacked-grouped", "dual-axis",
+  "pie", "two-level-pie", "treemap", "multi-level-treemap",
+  "ranking-bar", "regression-scatter"
+];
+
+// 이상치가 포함된 Mock 데이터 생성
+function generateMockDataWithOutliers(count: number) {
   const data = [];
   const baseDate = new Date(2024, 0, 1);
 
@@ -16,23 +23,30 @@ function generateMockData(count: number) {
     const date = new Date(baseDate);
     date.setMonth(date.getMonth() + i);
 
+    // 기본 값
+    let gdp = Math.round((2 + Math.random() * 3 + Math.sin(i / 3) * 1.5) * 10) / 10;
+    let unemployment = Math.round((3.5 + Math.random() * 1.5 - Math.cos(i / 4) * 0.8) * 10) / 10;
+    let inflation = Math.round((2 + Math.random() * 2.5 + Math.sin(i / 2) * 1) * 10) / 10;
+    let interestRate = Math.round((3 + Math.random() * 1.5) * 10) / 10;
+
+    // 이상치 추가 (3번째, 7번째, 11번째 데이터에 이상치)
+    if (i === 2) gdp = 12.5; // 상한 이상치
+    if (i === 6) unemployment = 8.9; // 상한 이상치
+    if (i === 10) inflation = -2.1; // 하한 이상치
+
     data.push({
       date: date.toISOString().slice(0, 7),
       date_display: `${date.getFullYear()}.${String(date.getMonth() + 1).padStart(2, "0")}`,
-      "GDP성장률": Math.round((2 + Math.random() * 3 + Math.sin(i / 3) * 1.5) * 10) / 10,
-      "실업률": Math.round((3.5 + Math.random() * 1.5 - Math.cos(i / 4) * 0.8) * 10) / 10,
-      "물가상승률": Math.round((2 + Math.random() * 2.5 + Math.sin(i / 2) * 1) * 10) / 10,
-      "금리": Math.round((3 + Math.random() * 1.5) * 10) / 10,
+      "GDP성장률": gdp,
+      "실업률": unemployment,
+      "물가상승률": inflation,
+      "금리": interestRate,
     });
   }
   return data;
 }
 
-const AVAILABLE_CHART_TYPES: ChartType[] = [
-  "line", "area", "column", "stacked", "stacked-100", "pie", "treemap", "ranking-bar"
-];
-
-// Error Boundary Component
+// Error Boundary
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { hasError: boolean; error: Error | null }
@@ -41,17 +55,15 @@ class ErrorBoundary extends React.Component<
     super(props);
     this.state = { hasError: false, error: null };
   }
-
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, error };
   }
-
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ color: "red", padding: 20 }}>
+        <div className="text-red-500 p-5">
           <strong>Chart Error:</strong> {this.state.error?.message}
-          <pre style={{ fontSize: 12, marginTop: 10 }}>{this.state.error?.stack}</pre>
+          <pre className="text-xs mt-2">{this.state.error?.stack}</pre>
         </div>
       );
     }
@@ -61,22 +73,53 @@ class ErrorBoundary extends React.Component<
 
 export default function App() {
   const [chartType, setChartType] = useState<ChartType>("line");
-  const [dataCount, setDataCount] = useState(12);
+  const [dataCount] = useState(12);
   const [showOutliers, setShowOutliers] = useState(false);
   const [showMissingValues, setShowMissingValues] = useState(false);
 
   const seriesFields = ["GDP성장률", "실업률", "물가상승률", "금리"];
   const [enabledSeries, setEnabledSeries] = useState<Set<string>>(new Set(seriesFields));
 
-  // Tooltip 상태 (호버 시 값 표시용)
+  // Tooltip 상태
   const [tooltipPayload, setTooltipPayload] = useState<any[] | null>(null);
   const [hoveredLabel, setHoveredLabel] = useState<string | null>(null);
 
-  // 혼합 차트용 상태
-  const [yFieldTypes, setYFieldTypes] = useState<Record<string, "column" | "line">>({});
-  const [yAxisPlacements, setYAxisPlacements] = useState<Record<string, YAxisPlacement>>({});
+  // 혼합/이중축 차트용 상태
+  const [yFieldTypes, setYFieldTypes] = useState<Record<string, "column" | "line">>({
+    "GDP성장률": "line",
+    "실업률": "column",
+    "물가상승률": "line",
+    "금리": "column",
+  });
+  const [yAxisPlacements, setYAxisPlacements] = useState<Record<string, YAxisPlacement>>({
+    "GDP성장률": "left",
+    "실업률": "left",
+    "물가상승률": "right",
+    "금리": "right",
+  });
 
-  const data = useMemo(() => generateMockData(dataCount), [dataCount]);
+  // 그룹형 누적막대용 상태
+  const [groupCount, setGroupCount] = useState(2);
+  const [seriesGroupAssignments, setSeriesGroupAssignments] = useState<Record<string, number>>({
+    "GDP성장률": 1,
+    "실업률": 1,
+    "물가상승률": 2,
+    "금리": 2,
+  });
+
+  // 동기화 영역 차트용
+  const [syncedAreaLeftField, setSyncedAreaLeftField] = useState<string | null>("GDP성장률");
+  const [syncedAreaRightField, setSyncedAreaRightField] = useState<string | null>("실업률");
+
+  // 회귀 산점도용
+  const [regressionScatterXField, setRegressionScatterXField] = useState<string | null>("GDP성장률");
+  const [regressionScatterYField, setRegressionScatterYField] = useState<string | null>("실업률");
+  const [regressionStats, setRegressionStats] = useState<{ r2: number } | null>(null);
+
+  // 트리맵 통계
+  const [treemapStats, setTreemapStats] = useState<any>(null);
+
+  const data = useMemo(() => generateMockDataWithOutliers(dataCount), [dataCount]);
 
   // 테마 색상
   const themeColors = useMemo(() => getThemeColors(), []);
@@ -131,101 +174,84 @@ export default function App() {
     setYAxisPlacements((prev) => ({ ...prev, [field]: placement }));
   }, []);
 
+  // 그룹 개수 변경
+  const handleGroupCountChange = useCallback((count: number) => {
+    setGroupCount(count);
+  }, []);
+
+  // 시리즈 그룹 변경
+  const handleSeriesGroupChange = useCallback((field: string, group: number) => {
+    setSeriesGroupAssignments((prev) => ({ ...prev, [field]: group }));
+  }, []);
+
+  // 동기화 영역 필드 변경
+  const handleSyncedAreaFieldChange = useCallback((position: 'left' | 'right', field: string) => {
+    if (position === 'left') setSyncedAreaLeftField(field);
+    else setSyncedAreaRightField(field);
+  }, []);
+
+  // 회귀 산점도 필드 변경
+  const handleRegressionScatterFieldChange = useCallback((axis: 'x' | 'y', field: string) => {
+    if (axis === 'x') setRegressionScatterXField(field);
+    else setRegressionScatterYField(field);
+  }, []);
+
   // 이상치/결측치 지원 여부
-  const OUTLIER_UNSUPPORTED: ChartType[] = ["stacked", "stacked-100", "area", "pie", "treemap", "ranking-bar"];
-  const MISSING_UNSUPPORTED: ChartType[] = ["pie", "treemap", "ranking-bar"];
+  const OUTLIER_UNSUPPORTED: ChartType[] = ["stacked", "stacked-100", "stacked-grouped", "area", "area-100", "stacked-area", "synced-area", "pie", "two-level-pie", "treemap", "multi-level-treemap", "ranking-bar", "geo-grid", "regression-scatter"];
+  const MISSING_UNSUPPORTED: ChartType[] = ["pie", "two-level-pie", "treemap", "multi-level-treemap", "ranking-bar", "stacked-area", "synced-area", "geo-grid", "regression-scatter"];
   const supportsOutliers = !OUTLIER_UNSUPPORTED.includes(chartType);
   const supportsMissing = !MISSING_UNSUPPORTED.includes(chartType);
 
+  // 랭킹 데이터
+  const rankingData = useMemo(() => {
+    if (chartType !== "ranking-bar") return null;
+    const lastData = data[data.length - 1];
+    return seriesFields
+      .map((field) => ({
+        name: field,
+        value: typeof lastData?.[field] === "number" ? lastData[field] as number : 0,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [chartType, data, seriesFields]);
+
   return (
-    <div style={{
-      padding: 0,
-      fontFamily: "system-ui, sans-serif",
-      background: "#f8fafc",
-      minHeight: "100vh",
-      display: "flex",
-      flexDirection: "column",
-    }}>
-      {/* 헤더 */}
-      <div style={{
-        padding: "16px 24px",
-        background: "white",
-        borderBottom: "1px solid rgba(0, 0, 0, 0.06)",
-      }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#1e293b" }}>
-          Sectorbook Chart Widget - Step 3 Demo
-        </h1>
-        <p style={{ margin: "8px 0 0", fontSize: 13, color: "#64748b" }}>
-          Chart + Legend Panel 통합 데모
-        </p>
-      </div>
-
-      {/* 데이터 컨트롤 */}
-      <div style={{
-        padding: "12px 24px",
-        background: "white",
-        borderBottom: "1px solid rgba(0, 0, 0, 0.06)",
-        display: "flex",
-        gap: 16,
-        alignItems: "center",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 13, fontWeight: 500, color: "#475569" }}>Data Points:</label>
-          <select
-            value={dataCount}
-            onChange={(e) => setDataCount(Number(e.target.value))}
-            style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }}
-          >
-            <option value={6}>6개월</option>
-            <option value={12}>12개월</option>
-            <option value={24}>24개월</option>
-          </select>
-        </div>
-      </div>
-
+    <div className="h-screen flex flex-col bg-background">
       {/* 메인 콘텐츠: Chart + Legend Panel */}
-      <div style={{
-        flex: 1,
-        display: "flex",
-        gap: 0,
-        padding: 24,
-        minHeight: 0,
-      }}>
+      <div className="flex-1 flex min-h-0">
         {/* 좌측: Chart */}
-        <div style={{
-          flex: 1,
-          minWidth: 0,
-          display: "flex",
-          flexDirection: "column",
-          background: "#ffffff",
-          border: "1px solid rgba(0, 0, 0, 0.06)",
-        }}>
-          <ErrorBoundary>
-            <ChartWidget
-              data={data}
-              seriesFields={seriesFields}
-              chartType={chartType}
-              enabledSeries={enabledSeries}
-              height="100%"
-              showOutliers={showOutliers}
-              yFieldTypes={yFieldTypes}
-              yAxisPlacements={yAxisPlacements}
-              onTooltipChange={(payload) => setTooltipPayload(payload)}
-              onHoveredLabelChange={(label) => setHoveredLabel(label)}
-            />
-          </ErrorBoundary>
+        <div className="flex-1 min-w-0 flex flex-col border-r">
+          {/* 차트 헤더 */}
+          <div className="px-4 py-3 border-b">
+            <h3 className="font-medium text-sm">경제 지표 차트</h3>
+          </div>
+          {/* 차트 영역 */}
+          <div className="flex-1 min-h-0 p-4">
+            <ErrorBoundary>
+              <ChartWidget
+                data={data}
+                seriesFields={seriesFields}
+                chartType={chartType}
+                enabledSeries={enabledSeries}
+                height="100%"
+                showOutliers={showOutliers}
+                yFieldTypes={yFieldTypes}
+                yAxisPlacements={yAxisPlacements}
+                seriesGroupAssignments={seriesGroupAssignments}
+                syncedAreaLeftField={syncedAreaLeftField}
+                syncedAreaRightField={syncedAreaRightField}
+                regressionScatterXField={regressionScatterXField}
+                regressionScatterYField={regressionScatterYField}
+                onTooltipChange={(payload) => setTooltipPayload(payload)}
+                onHoveredLabelChange={(label) => setHoveredLabel(label)}
+                onTreemapStatsChange={setTreemapStats}
+                onRegressionStatsChange={(stats) => stats && setRegressionStats({ r2: stats.rSquared })}
+              />
+            </ErrorBoundary>
+          </div>
         </div>
 
-        {/* 우측: Legend Panel */}
-        <div style={{
-          width: 300,
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          background: "#ffffff",
-          border: "1px solid rgba(0, 0, 0, 0.06)",
-          borderLeft: "none",
-        }}>
+        {/* 우측: Legend Panel (300px) */}
+        <div className="w-[300px] flex-shrink-0 flex flex-col bg-card">
           <ChartLegendPanel
             layout="sidePanel"
             seriesFields={seriesFields}
@@ -234,6 +260,7 @@ export default function App() {
             tooltipPayload={tooltipPayload}
             hoveredLabel={hoveredLabel}
             analysisResult={null}
+            rankingData={rankingData}
             onSeriesToggle={toggleSeries}
             onToggleAll={toggleAllSeries}
             chartType={chartType}
@@ -241,8 +268,24 @@ export default function App() {
             yAxisPlacements={yAxisPlacements}
             onYFieldTypeChange={handleYFieldTypeChange}
             onYAxisPlacementChange={handleYAxisPlacementChange}
+            // 그룹형 누적막대
+            groupCount={groupCount}
+            seriesGroupAssignments={seriesGroupAssignments}
+            onGroupCountChange={handleGroupCountChange}
+            onSeriesGroupChange={handleSeriesGroupChange}
+            // 동기화 영역 차트
+            syncedAreaLeftField={syncedAreaLeftField || undefined}
+            syncedAreaRightField={syncedAreaRightField || undefined}
+            onSyncedAreaFieldChange={handleSyncedAreaFieldChange}
+            // 회귀 산점도
+            regressionScatterXField={regressionScatterXField || undefined}
+            regressionScatterYField={regressionScatterYField || undefined}
+            onRegressionScatterFieldChange={handleRegressionScatterFieldChange}
+            regressionStats={regressionStats}
+            // 트리맵 통계
+            treemapStats={treemapStats}
             // 차트 제어판 props
-            allowedChartTypes={AVAILABLE_CHART_TYPES}
+            allowedChartTypes={ALL_CHART_TYPES}
             onChartTypeChange={setChartType}
             showOutliers={showOutliers}
             showMissingValues={showMissingValues}
