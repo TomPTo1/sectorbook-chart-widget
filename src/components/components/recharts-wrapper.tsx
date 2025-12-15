@@ -28,15 +28,33 @@ export interface ChartThemeColors {
   seriesColors: string[];
 }
 
-/** CSS 변수에서 색상 값 추출 */
+/** CSS 변수에서 색상 값 추출 - 기본값 포함 */
+const DEFAULT_COLORS: Record<string, string> = {
+  "--foreground": "hsl(222 47% 11%)",
+  "--border": "hsl(214 32% 91%)",
+  "--chart-1": "hsl(220 70% 50%)",
+  "--chart-2": "hsl(160 60% 45%)",
+  "--chart-3": "hsl(30 80% 55%)",
+  "--chart-4": "hsl(280 65% 60%)",
+  "--chart-5": "hsl(340 75% 55%)",
+  "--chart-6": "hsl(200 70% 50%)",
+  "--chart-7": "hsl(140 60% 45%)",
+  "--chart-8": "hsl(60 70% 50%)",
+};
+
 function getCSSVariable(varName: string): string {
-  if (typeof window === "undefined") return "";
-  const root = document.documentElement;
-  const value = getComputedStyle(root).getPropertyValue(varName).trim();
-  if (value.includes(" ")) {
-    return `hsl(${value})`;
+  if (typeof window === "undefined") return DEFAULT_COLORS[varName] || "";
+  try {
+    const root = document.documentElement;
+    const value = getComputedStyle(root).getPropertyValue(varName).trim();
+    if (!value) return DEFAULT_COLORS[varName] || "";
+    if (value.includes(" ")) {
+      return `hsl(${value})`;
+    }
+    return value || DEFAULT_COLORS[varName] || "";
+  } catch {
+    return DEFAULT_COLORS[varName] || "";
   }
-  return value;
 }
 
 /**
@@ -94,7 +112,10 @@ export function interpolateColor(startColor: string, endColor: string, ratio: nu
 /**
  * HSL 색상의 밝기를 조정하여 변형 색상 생성
  */
-function adjustLightness(hslString: string, adjustment: number): string {
+function adjustLightness(hslString: string | undefined, adjustment: number): string {
+  // undefined나 빈 문자열 처리
+  if (!hslString) return "hsl(220 70% 50%)";
+
   const match = hslString.match(/hsl\((\d+)\s+([\d.]+)%\s+([\d.]+)%\)/);
   if (!match) return hslString;
 
