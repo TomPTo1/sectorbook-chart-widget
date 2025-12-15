@@ -2,6 +2,20 @@
 export { default as ChartWidget } from "./components/ChartWidget";
 export type { ChartWidgetProps } from "./components/ChartWidget";
 
+// Legend Panel
+export { ChartLegendPanel } from "./components/components/chart-legend-panel";
+export { LegendItem } from "./components/components/legend-item";
+export { ChartSettingsSidebar } from "./components/components/chart-settings-sidebar";
+export { StackedGroupedSettingsSidebar } from "./components/components/stacked-grouped-settings-sidebar";
+
+// Recharts Utilities
+export {
+  expandSeriesColors,
+  getThemeColors,
+  interpolateColor,
+  getButtonBorderColor,
+} from "./components/components/recharts-wrapper";
+
 // UI Components
 export { Button } from "./components/ui/button";
 export {
