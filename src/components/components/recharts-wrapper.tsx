@@ -28,19 +28,26 @@ export interface ChartThemeColors {
   seriesColors: string[];
 }
 
-/** CSS 변수에서 색상 값 추출 - 기본값 포함 */
+/** CSS 변수에서 색상 값 추출 - 기본값 포함 (sectorbook light mode) */
 const DEFAULT_COLORS: Record<string, string> = {
-  "--foreground": "hsl(222 47% 11%)",
-  "--border": "hsl(214 32% 91%)",
-  "--chart-1": "hsl(220 70% 50%)",
-  "--chart-2": "hsl(160 60% 45%)",
-  "--chart-3": "hsl(30 80% 55%)",
-  "--chart-4": "hsl(280 65% 60%)",
-  "--chart-5": "hsl(340 75% 55%)",
+  "--foreground": "hsl(240 10% 3.9%)",
+  "--border": "hsl(240 5.9% 90%)",
+  "--chart-1": "hsl(12 76% 61%)",
+  "--chart-2": "hsl(173 58% 39%)",
+  "--chart-3": "hsl(197 37% 24%)",
+  "--chart-4": "hsl(43 74% 66%)",
+  "--chart-5": "hsl(27 87% 67%)",
   "--chart-6": "hsl(200 70% 50%)",
   "--chart-7": "hsl(140 60% 45%)",
   "--chart-8": "hsl(60 70% 50%)",
 };
+
+/** 기본 시리즈 색상 배열 (fallback) */
+const FALLBACK_SERIES_COLORS = [
+  "hsl(12 76% 61%)", "hsl(173 58% 39%)", "hsl(197 37% 24%)",
+  "hsl(43 74% 66%)", "hsl(27 87% 67%)", "hsl(200 70% 50%)",
+  "hsl(140 60% 45%)", "hsl(60 70% 50%)",
+];
 
 function getCSSVariable(varName: string): string {
   if (typeof window === "undefined") return DEFAULT_COLORS[varName] || "";
@@ -192,17 +199,20 @@ function calculateStackedDomain(
  * 8개 이상 시리즈를 위한 색상 확장
  */
 export function expandSeriesColors(baseColors: string[], count: number): string[] {
-  if (count <= baseColors.length) {
-    return baseColors.slice(0, count);
+  // 빈 배열인 경우 fallback 사용
+  const colors = baseColors.length > 0 ? baseColors : FALLBACK_SERIES_COLORS;
+
+  if (count <= colors.length) {
+    return colors.slice(0, count);
   }
 
-  const expanded = [...baseColors];
-  for (let i = baseColors.length; i < count; i++) {
-    const baseIndex = (i - 8) % baseColors.length;
-    const cycle = Math.floor((i - 8) / baseColors.length);
+  const expanded = [...colors];
+  for (let i = colors.length; i < count; i++) {
+    const baseIndex = (i - 8) % colors.length;
+    const cycle = Math.floor((i - 8) / colors.length);
 
     const adjustment = cycle % 2 === 0 ? 15 : -15;
-    expanded.push(adjustLightness(baseColors[baseIndex], adjustment));
+    expanded.push(adjustLightness(colors[baseIndex], adjustment));
   }
 
   return expanded;
@@ -214,20 +224,22 @@ export function getThemeColors(): ChartThemeColors {
   const isDark = typeof window !== "undefined" && document.documentElement.classList.contains('dark');
   const gridColor = isDark ? "hsl(0 0% 25%)" : "hsl(0 0% 85%)";
 
+  const seriesColors = [
+    getCSSVariable("--chart-1"),
+    getCSSVariable("--chart-2"),
+    getCSSVariable("--chart-3"),
+    getCSSVariable("--chart-4"),
+    getCSSVariable("--chart-5"),
+    getCSSVariable("--chart-6"),
+    getCSSVariable("--chart-7"),
+    getCSSVariable("--chart-8"),
+  ].filter(Boolean);
+
   return {
-    textColor: getCSSVariable("--foreground"),
-    axisLineColor: getCSSVariable("--border"),
+    textColor: getCSSVariable("--foreground") || "hsl(240 10% 3.9%)",
+    axisLineColor: getCSSVariable("--border") || "hsl(240 5.9% 90%)",
     gridColor,
-    seriesColors: [
-      getCSSVariable("--chart-1"),
-      getCSSVariable("--chart-2"),
-      getCSSVariable("--chart-3"),
-      getCSSVariable("--chart-4"),
-      getCSSVariable("--chart-5"),
-      getCSSVariable("--chart-6"),
-      getCSSVariable("--chart-7"),
-      getCSSVariable("--chart-8"),
-    ].filter(Boolean),
+    seriesColors: seriesColors.length > 0 ? seriesColors : FALLBACK_SERIES_COLORS,
   };
 }
 
