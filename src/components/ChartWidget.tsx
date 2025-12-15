@@ -127,6 +127,10 @@ export function ChartWidget({
   className,
   height = "100%",
 }: ChartWidgetProps) {
+  // 필수 props 방어 처리
+  const safeSeriesFields = seriesFields || [];
+  const safeEnabledSeries = enabledSeries || new Set<string>();
+
   // 테마 색상 (CSS 변수에서 동적으로 가져옴)
   const [themeColors, setThemeColors] = useState(getThemeColors());
 
@@ -175,8 +179,8 @@ export function ChartWidget({
 
   // 시리즈 색상 확장
   const seriesColors = useMemo(
-    () => expandSeriesColors(themeColors.seriesColors, seriesFields.length),
-    [themeColors.seriesColors, seriesFields.length]
+    () => expandSeriesColors(themeColors.seriesColors || [], safeSeriesFields.length),
+    [themeColors.seriesColors, safeSeriesFields.length]
   );
 
   // 데이터가 없을 때 표시
@@ -193,7 +197,7 @@ export function ChartWidget({
   }
 
   // 활성화된 시리즈만 필터링
-  const activeSeriesFields = seriesFields.filter(f => enabledSeries.has(f));
+  const activeSeriesFields = safeSeriesFields.filter(f => safeEnabledSeries.has(f));
 
   // 이상치 지원 여부
   const supportsOutliers = !OUTLIER_UNSUPPORTED_CHARTS.includes(chartType);
@@ -256,7 +260,7 @@ export function ChartWidget({
           data={data}
           analysisResult={analysisResult}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           seriesColors={seriesColors}
           chartType={chartType}
           themeColors={themeColors}
@@ -278,7 +282,7 @@ export function ChartWidget({
         <RechartsPieWrapper
           data={pieChartData}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           seriesColors={seriesColors}
           onTooltipChange={handleTooltipChange}
         />
@@ -291,7 +295,7 @@ export function ChartWidget({
         <RechartsTwoLevelPieWrapper
           data={twoLevelPieData}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           colors={TWO_LEVEL_PIE_COLORS}
           onTooltipChange={handleTooltipChange}
         />
@@ -304,7 +308,7 @@ export function ChartWidget({
         <RechartsTreemapWrapper
           data={treemapData}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           seriesColors={seriesColors}
           onTooltipChange={handleTooltipChange}
         />
@@ -317,7 +321,7 @@ export function ChartWidget({
         <RechartsMultiLevelTreemapWrapper
           data={data}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           colors={MULTI_LEVEL_TREEMAP_COLORS}
           onTooltipChange={handleTooltipChange}
           onStatsChange={onTreemapStatsChange}
@@ -331,7 +335,7 @@ export function ChartWidget({
         <RechartsRankingBarWrapper
           data={data}
           seriesFields={activeSeriesFields}
-          enabledSeries={enabledSeries}
+          enabledSeries={safeEnabledSeries}
           seriesColors={seriesColors}
           onTooltipChange={handleTooltipChange}
         />
@@ -507,7 +511,7 @@ export function ChartWidget({
       <RechartsWrapper
         data={data}
         seriesFields={activeSeriesFields}
-        enabledSeries={enabledSeries}
+        enabledSeries={safeEnabledSeries}
         seriesColors={seriesColors}
         chartType={chartType}
         themeColors={themeColors}
