@@ -138,8 +138,8 @@ export default function App() {
           enabledSeries={chartState.enabledSeries}
           showOutliers={chartState.showOutliers}
           showMissingValues={chartState.showMissingValues}
-          yFieldTypes={chartState.yFieldTypes}
-          yAxisPlacements={chartState.yAxisPlacements}
+          yFieldTypes={Object.fromEntries(chartState.yFieldTypes)}
+          yAxisPlacements={Object.fromEntries(chartState.yAxisPlacements)}
           height="100%"
         />
       </div>
