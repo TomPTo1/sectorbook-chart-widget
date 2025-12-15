@@ -1,6 +1,7 @@
 {
   "name": "@tompto1/chart-widget",
   "version": "0.1.0",
+  "type": "module",
   "description": "Recharts-based chart widget with legend panel, 18 chart types, outlier detection, and data quality visualization",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -32,29 +33,30 @@
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "react-is": "^19.0.0",
-    "recharts": "^3.5.1",
+    "@radix-ui/react-select": "^2.1.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.474.0",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^3.0.1",
-    "@radix-ui/react-slot": "^1.1.0",
-    "@radix-ui/react-select": "^2.1.0",
-    "class-variance-authority": "^0.7.0"
+    "react-is": "^19.0.0",
+    "recharts": "^3.5.1",
+    "tailwind-merge": "^3.0.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.0.0",
     "postcss": "^8.4.49",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^3.4.0",
-    "typescript": "^5.7.0",
+    "tailwindcss-animate": "^1.0.7",
     "tsup": "^8.0.0",
-    "vite": "^6.0.0",
-    "eslint": "^9.0.0"
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
   },
   "keywords": [
     "react",
