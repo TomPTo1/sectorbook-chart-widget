@@ -31,6 +31,8 @@ const AVAILABLE_CHART_TYPES: ChartType[] = [
   "mixed", "dual-axis", "pie", "treemap", "ranking-bar"
 ];
 
+const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444"];
+
 export default function App() {
   const [chartType, setChartType] = useState<ChartType>("line");
   const [dataCount, setDataCount] = useState(12);
@@ -49,23 +51,81 @@ export default function App() {
     });
   };
 
+  const styles = {
+    container: {
+      minHeight: "100vh",
+      padding: 24,
+      background: "#f8fafc",
+    } as React.CSSProperties,
+    inner: {
+      maxWidth: 1200,
+      margin: "0 auto",
+    } as React.CSSProperties,
+    title: {
+      fontSize: 24,
+      fontWeight: "bold",
+      color: "#1e293b",
+      marginBottom: 24,
+    } as React.CSSProperties,
+    card: {
+      background: "white",
+      borderRadius: 8,
+      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+      padding: 16,
+      marginBottom: 16,
+    } as React.CSSProperties,
+    row: {
+      display: "flex",
+      gap: 20,
+      flexWrap: "wrap" as const,
+    } as React.CSSProperties,
+    label: {
+      display: "block",
+      fontSize: 14,
+      fontWeight: 500,
+      color: "#475569",
+      marginBottom: 6,
+    } as React.CSSProperties,
+    select: {
+      padding: "8px 12px",
+      border: "1px solid #cbd5e1",
+      borderRadius: 6,
+      fontSize: 14,
+    } as React.CSSProperties,
+    seriesRow: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap" as const,
+    } as React.CSSProperties,
+    chartContainer: {
+      height: 450,
+    } as React.CSSProperties,
+  };
+
+  const getButtonStyle = (field: string, index: number): React.CSSProperties => ({
+    padding: "8px 16px",
+    borderRadius: 20,
+    border: "none",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: enabledSeries.has(field) ? 600 : 400,
+    background: enabledSeries.has(field) ? COLORS[index % COLORS.length] : "#e2e8f0",
+    color: enabledSeries.has(field) ? "white" : "#64748b",
+  });
+
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold text-slate-800 mb-6">
-          Sectorbook Chart Widget Demo
-        </h1>
+    <div style={styles.container}>
+      <div style={styles.inner}>
+        <h1 style={styles.title}>Sectorbook Chart Widget Demo</h1>
 
         {/* Controls */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4 flex flex-wrap gap-4">
+        <div style={{ ...styles.card, ...styles.row }}>
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">
-              Chart Type
-            </label>
+            <label style={styles.label}>Chart Type</label>
             <select
               value={chartType}
               onChange={(e) => setChartType(e.target.value as ChartType)}
-              className="px-3 py-2 border border-slate-300 rounded-md text-sm"
+              style={styles.select}
             >
               {AVAILABLE_CHART_TYPES.map((type) => (
                 <option key={type} value={type}>
@@ -76,13 +136,11 @@ export default function App() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">
-              Data Points
-            </label>
+            <label style={styles.label}>Data Points</label>
             <select
               value={dataCount}
               onChange={(e) => setDataCount(Number(e.target.value))}
-              className="px-3 py-2 border border-slate-300 rounded-md text-sm"
+              style={styles.select}
             >
               <option value={6}>6개월</option>
               <option value={12}>12개월</option>
@@ -93,20 +151,14 @@ export default function App() {
         </div>
 
         {/* Series Toggle */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mb-4">
-          <label className="block text-sm font-medium text-slate-600 mb-2">
-            Series
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {seriesFields.map((field) => (
+        <div style={styles.card}>
+          <label style={styles.label}>Series</label>
+          <div style={styles.seriesRow}>
+            {seriesFields.map((field, i) => (
               <button
                 key={field}
                 onClick={() => toggleSeries(field)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  enabledSeries.has(field)
-                    ? "bg-blue-500 text-white"
-                    : "bg-slate-200 text-slate-600"
-                }`}
+                style={getButtonStyle(field, i)}
               >
                 {field}
               </button>
@@ -115,7 +167,7 @@ export default function App() {
         </div>
 
         {/* Chart */}
-        <div className="bg-white rounded-lg shadow-sm p-4" style={{ height: 450 }}>
+        <div style={{ ...styles.card, ...styles.chartContainer }}>
           <ChartWidget
             data={data}
             seriesFields={seriesFields}
@@ -123,35 +175,6 @@ export default function App() {
             enabledSeries={enabledSeries}
             height="100%"
           />
-        </div>
-
-        {/* Data Table */}
-        <div className="bg-white rounded-lg shadow-sm p-4 mt-4">
-          <h2 className="text-lg font-semibold text-slate-700 mb-3">Data Preview</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="px-4 py-2 text-left text-slate-600">Date</th>
-                  {seriesFields.map((field) => (
-                    <th key={field} className="px-4 py-2 text-right text-slate-600">{field}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {data.slice(0, 8).map((row, i) => (
-                  <tr key={i} className="border-t border-slate-100">
-                    <td className="px-4 py-2 text-slate-700">{row.date_display}</td>
-                    {seriesFields.map((field) => (
-                      <td key={field} className="px-4 py-2 text-right text-slate-600">
-                        {row[field] != null ? Number(row[field]).toFixed(1) : "-"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
       </div>
     </div>
