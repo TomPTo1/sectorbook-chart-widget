@@ -5,7 +5,6 @@ import type {
   ChartType,
   ChartDataRow,
   YAxisPlacement,
-  ExtendedDataAnalysisResult
 } from "../types/chart-config";
 import {
   ResponsiveContainer,
@@ -41,14 +40,6 @@ const OUTLIER_UNSUPPORTED_CHARTS: ChartType[] = [
   "ranking-bar", "geo-grid", "regression-scatter",
 ];
 
-// 결측치 표시 미지원 차트 타입
-const MISSING_UNSUPPORTED_CHARTS: ChartType[] = [
-  "pie", "two-level-pie",
-  "treemap", "multi-level-treemap",
-  "ranking-bar", "stacked-area", "synced-area",
-  "geo-grid", "regression-scatter",
-];
-
 // ============================================================
 // Props Interface
 // ============================================================
@@ -64,15 +55,13 @@ export interface ChartWidgetProps {
 
   // Optional Features
   showOutliers?: boolean;
-  showMissingValues?: boolean;
 
   // Optional Axis Configuration
-  yFieldTypes?: Map<string, "line" | "column">;
-  yAxisPlacements?: Map<string, YAxisPlacement>;
+  yFieldTypes?: Record<string, "line" | "column">;
+  yAxisPlacements?: Record<string, YAxisPlacement>;
 
   // Optional Grouping (for stacked-grouped)
-  groupCount?: number;
-  seriesGroupAssignments?: Map<string, number>;
+  seriesGroupAssignments?: Record<string, number>;
 
   // Optional Synced Area Configuration
   syncedAreaLeftField?: string | null;
@@ -87,6 +76,7 @@ export interface ChartWidgetProps {
     id: string;
     name: string;
     unit?: string;
+    seriesUnits?: Record<string, string>;
   } | null;
 
   // Optional Callbacks
@@ -106,15 +96,13 @@ export interface ChartWidgetProps {
 
 export function ChartWidget({
   data,
-  seriesFields,
+  seriesFields: propSeriesFields,
   chartType,
-  enabledSeries,
+  enabledSeries: propEnabledSeries,
   showOutliers = false,
-  showMissingValues = false,
-  yFieldTypes = new Map(),
-  yAxisPlacements = new Map(),
-  groupCount = 2,
-  seriesGroupAssignments = new Map(),
+  yFieldTypes,
+  yAxisPlacements,
+  seriesGroupAssignments,
   syncedAreaLeftField = null,
   syncedAreaRightField = null,
   regressionScatterXField = null,
@@ -127,15 +115,12 @@ export function ChartWidget({
   className,
   height = "100%",
 }: ChartWidgetProps) {
-  // 필수 props 방어 처리
-  const safeSeriesFields = seriesFields || [];
-  const safeEnabledSeries = enabledSeries || new Set<string>();
+  // 방어 처리
+  const seriesFields = propSeriesFields || [];
+  const enabledSeries = propEnabledSeries || new Set<string>();
 
   // 테마 색상 (CSS 변수에서 동적으로 가져옴)
   const [themeColors, setThemeColors] = useState(getThemeColors());
-
-  // 회귀 산점도 이상치 개수
-  const [regressionOutlierCount, setRegressionOutlierCount] = useState<number>(0);
 
   // 차트 컨테이너 높이 측정
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -145,9 +130,9 @@ export function ChartWidget({
   useEffect(() => {
     const updateHeight = () => {
       if (chartContainerRef.current) {
-        const containerHeight = chartContainerRef.current.clientHeight;
-        if (containerHeight > 0) {
-          setChartHeight(containerHeight);
+        const h = chartContainerRef.current.clientHeight;
+        if (h > 0) {
+          setChartHeight(h);
         }
       }
     };
@@ -158,32 +143,134 @@ export function ChartWidget({
       resizeObserver.observe(chartContainerRef.current);
     }
 
-    return () => {
-      resizeObserver.disconnect();
-    };
+    return () => resizeObserver.disconnect();
   }, []);
 
-  // 테마 색상 업데이트
+  // 테마 변경 감지
   useEffect(() => {
-    const updateColors = () => setThemeColors(getThemeColors());
-    updateColors();
+    const updateTheme = () => {
+      setThemeColors(getThemeColors());
+    };
 
-    const observer = new MutationObserver(updateColors);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style"]
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (mutation.attributeName === "class") {
+          updateTheme();
+        }
+      });
     });
 
+    observer.observe(document.documentElement, { attributes: true });
     return () => observer.disconnect();
   }, []);
 
-  // 시리즈 색상 확장
-  const seriesColors = useMemo(
-    () => expandSeriesColors(themeColors.seriesColors || [], safeSeriesFields.length),
-    [themeColors.seriesColors, safeSeriesFields.length]
-  );
+  // 좌/우측 필드 분리 (이중축 차트 전용)
+  const { leftFields, rightFields } = useMemo(() => {
+    if (chartType !== 'dual-axis' || !yAxisPlacements) {
+      return { leftFields: seriesFields, rightFields: [] };
+    }
+    const left = seriesFields.filter(f => (yAxisPlacements[f] ?? 'left') === 'left');
+    const right = seriesFields.filter(f => yAxisPlacements[f] === 'right');
+    return { leftFields: left, rightFields: right };
+  }, [chartType, seriesFields, yAxisPlacements]);
 
-  // 데이터가 없을 때 표시
+  // 좌/우축 단위 계산 (이중축 차트 전용)
+  const { leftAxisUnit, rightAxisUnit } = useMemo(() => {
+    if (chartType !== 'dual-axis' || !scenario?.seriesUnits) {
+      return { leftAxisUnit: undefined, rightAxisUnit: undefined };
+    }
+
+    let leftUnit: string | undefined;
+    for (const field of leftFields) {
+      if (scenario.seriesUnits[field]) {
+        leftUnit = scenario.seriesUnits[field];
+        break;
+      }
+    }
+
+    let rightUnit: string | undefined;
+    for (const field of rightFields) {
+      if (scenario.seriesUnits[field]) {
+        rightUnit = scenario.seriesUnits[field];
+        break;
+      }
+    }
+
+    return { leftAxisUnit: leftUnit, rightAxisUnit: rightUnit };
+  }, [chartType, scenario?.seriesUnits, leftFields, rightFields]);
+
+  // 이상치 분석
+  const analysisResult = useMemo(() => {
+    if (!data || data.length === 0 || seriesFields.length === 0) return null;
+
+    if (chartType === 'dual-axis' && (leftFields.length > 0 || rightFields.length > 0)) {
+      const leftAnalysis = leftFields.length > 0
+        ? analyzeDataQualityExtended(data, leftFields, seriesFields)
+        : null;
+      const rightAnalysis = rightFields.length > 0
+        ? analyzeDataQualityExtended(data, rightFields, seriesFields)
+        : null;
+
+      return {
+        outliers: [
+          ...(leftAnalysis?.outliers || []),
+          ...(rightAnalysis?.outliers || [])
+        ],
+        missingValues: [],
+        iqrBounds: {
+          ...(leftAnalysis?.iqrBounds || {}),
+          ...(rightAnalysis?.iqrBounds || {})
+        },
+        seriesIQR: [],
+        leftClassifiedData: leftAnalysis?.classifiedData || undefined,
+        rightClassifiedData: rightAnalysis?.classifiedData || undefined,
+        classifiedData: leftAnalysis?.classifiedData || rightAnalysis?.classifiedData || null,
+        hasUpperOutliers: (leftAnalysis?.hasUpperOutliers || false) || (rightAnalysis?.hasUpperOutliers || false),
+        hasLowerOutliers: (leftAnalysis?.hasLowerOutliers || false) || (rightAnalysis?.hasLowerOutliers || false),
+      };
+    }
+
+    return analyzeDataQualityExtended(data, seriesFields);
+  }, [data, seriesFields, chartType, leftFields, rightFields]);
+
+  // 이상치 Scatter 데이터
+  const outlierScatterData = useMemo(() => {
+    if (!analysisResult) return [];
+    return outliersToScatterData(analysisResult.outliers);
+  }, [analysisResult]);
+
+  // 파이 차트 데이터
+  const pieChartData = useMemo(() => {
+    if (chartType !== "pie" || !data || data.length === 0) return [];
+    return calculateSeriesSums(data, seriesFields);
+  }, [chartType, data, seriesFields]);
+
+  // 2단계 파이 차트 데이터
+  const twoLevelPieData = useMemo(() => {
+    if (chartType !== "two-level-pie" || !data || data.length === 0)
+      return { innerData: [], outerData: [] };
+    return calculateTwoLevelPieData(data, seriesFields);
+  }, [chartType, data, seriesFields]);
+
+  // 트리맵 데이터
+  const treemapData = useMemo(() => {
+    if ((chartType !== "treemap" && chartType !== "multi-level-treemap") || !data || data.length === 0) return [];
+    return calculateTreemapData(data, seriesFields);
+  }, [chartType, data, seriesFields]);
+
+  // 시리즈 색상
+  const seriesColors = useMemo(() => {
+    const baseColors = chartType === "two-level-pie"
+      ? TWO_LEVEL_PIE_COLORS
+      : chartType === "multi-level-treemap"
+        ? MULTI_LEVEL_TREEMAP_COLORS
+        : (themeColors.seriesColors.length > 0
+          ? themeColors.seriesColors
+          : ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"]);
+    return expandSeriesColors(baseColors, seriesFields.length);
+  }, [chartType, themeColors.seriesColors, seriesFields.length]);
+
+  // 데이터 없음
   if (!data || data.length === 0) {
     return (
       <div
@@ -196,120 +283,57 @@ export function ChartWidget({
     );
   }
 
-  // 활성화된 시리즈만 필터링
-  const activeSeriesFields = safeSeriesFields.filter(f => safeEnabledSeries.has(f));
-
-  // 이상치 지원 여부
   const supportsOutliers = !OUTLIER_UNSUPPORTED_CHARTS.includes(chartType);
-  const supportsMissing = !MISSING_UNSUPPORTED_CHARTS.includes(chartType);
+  const hasOutliers = analysisResult && (analysisResult.hasUpperOutliers || analysisResult.hasLowerOutliers);
 
-  const effectiveShowOutliers = showOutliers && supportsOutliers;
-  const effectiveShowMissing = showMissingValues && supportsMissing;
-
-  // 이상치/결측치 분석
-  const analysisResult = useMemo(() => {
-    if (!effectiveShowOutliers && !effectiveShowMissing) {
-      return null;
-    }
-    return analyzeDataQualityExtended(
-      data,
-      activeSeriesFields,
-      effectiveShowOutliers
-    );
-  }, [data, activeSeriesFields, effectiveShowOutliers, effectiveShowMissing]);
-
-  // 이상치 scatter 데이터
-  const outlierScatterData = useMemo(() => {
-    if (!analysisResult?.outliers || !effectiveShowOutliers) return [];
-    return outliersToScatterData(analysisResult.outliers);
-  }, [analysisResult, effectiveShowOutliers]);
-
-  // 파이 차트 데이터
-  const pieChartData = useMemo(() => {
-    if (chartType !== "pie") return null;
-    return calculateSeriesSums(data, activeSeriesFields, seriesColors);
-  }, [data, activeSeriesFields, seriesColors, chartType]);
-
-  // 2단계 파이 차트 데이터
-  const twoLevelPieData = useMemo(() => {
-    if (chartType !== "two-level-pie") return null;
-    return calculateTwoLevelPieData(data, activeSeriesFields);
-  }, [data, activeSeriesFields, chartType]);
-
-  // 트리맵 데이터
-  const treemapData = useMemo(() => {
-    if (chartType !== "treemap") return null;
-    return calculateTreemapData(data, activeSeriesFields);
-  }, [data, activeSeriesFields, chartType]);
-
-  // 툴팁 핸들러
-  const handleTooltipChange = (payload: any[] | null) => {
+  // 콜백 핸들러
+  const handleTooltipChange = (payload: any[] | null, label: string | null) => {
     onTooltipChange?.(payload);
-  };
-
-  const handleHoveredLabelChange = (label: string | null) => {
     onHoveredLabelChange?.(label);
   };
 
-  // 렌더링
+  // 차트 렌더링
   const renderChart = () => {
-    // 분할 차트 (이상치가 있는 경우)
-    if (effectiveShowOutliers && analysisResult?.classifiedData) {
-      return (
-        <RechartsSplitWrapper
-          data={data}
-          analysisResult={analysisResult}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          seriesColors={seriesColors}
-          chartType={chartType}
-          themeColors={themeColors}
-          chartHeight={chartHeight}
-          yFieldTypes={yFieldTypes}
-          yAxisPlacements={yAxisPlacements}
-          groupCount={groupCount}
-          seriesGroupAssignments={seriesGroupAssignments}
-          showMissingValues={effectiveShowMissing}
-          onTooltipChange={handleTooltipChange}
-          onHoveredLabelChange={handleHoveredLabelChange}
-        />
-      );
-    }
+    const h = chartHeight;
 
     // 파이 차트
-    if (chartType === "pie" && pieChartData) {
+    if (chartType === "pie") {
       return (
         <RechartsPieWrapper
           data={pieChartData}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          seriesColors={seriesColors}
+          enabledSeries={enabledSeries}
+          themeColors={themeColors}
+          height={h}
+          allSeriesFields={seriesFields}
           onTooltipChange={handleTooltipChange}
         />
       );
     }
 
     // 2단계 파이 차트
-    if (chartType === "two-level-pie" && twoLevelPieData) {
+    if (chartType === "two-level-pie") {
       return (
         <RechartsTwoLevelPieWrapper
-          data={twoLevelPieData}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          colors={TWO_LEVEL_PIE_COLORS}
+          innerData={twoLevelPieData.innerData}
+          outerData={twoLevelPieData.outerData}
+          enabledSeries={enabledSeries}
+          themeColors={themeColors}
+          height={h}
+          allSeriesFields={seriesFields}
           onTooltipChange={handleTooltipChange}
         />
       );
     }
 
     // 트리맵
-    if (chartType === "treemap" && treemapData) {
+    if (chartType === "treemap") {
       return (
         <RechartsTreemapWrapper
           data={treemapData}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          seriesColors={seriesColors}
+          enabledSeries={enabledSeries}
+          themeColors={themeColors}
+          height={h}
+          allSeriesFields={seriesFields}
           onTooltipChange={handleTooltipChange}
         />
       );
@@ -319,24 +343,34 @@ export function ChartWidget({
     if (chartType === "multi-level-treemap") {
       return (
         <RechartsMultiLevelTreemapWrapper
-          data={data}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          colors={MULTI_LEVEL_TREEMAP_COLORS}
+          data={treemapData}
+          enabledSeries={enabledSeries}
+          themeColors={themeColors}
+          height={h}
+          allSeriesFields={seriesFields}
           onTooltipChange={handleTooltipChange}
-          onStatsChange={onTreemapStatsChange}
+          onDrilldownChange={onTreemapStatsChange}
         />
       );
     }
 
-    // 랭킹 막대 차트
+    // 랭킹막대
     if (chartType === "ranking-bar") {
+      const lastData = data[data.length - 1];
+      const rankingData = seriesFields
+        .map((field) => ({
+          name: field,
+          value: typeof lastData?.[field] === "number" ? lastData[field] as number : 0,
+        }))
+        .sort((a, b) => b.value - a.value);
+
       return (
         <RechartsRankingBarWrapper
-          data={data}
-          seriesFields={activeSeriesFields}
-          enabledSeries={safeEnabledSeries}
-          seriesColors={seriesColors}
+          data={rankingData}
+          xField="name"
+          yField="value"
+          themeColors={themeColors}
+          height={h}
           onTooltipChange={handleTooltipChange}
         />
       );
@@ -347,12 +381,12 @@ export function ChartWidget({
       return (
         <RechartsRegressionScatterWrapper
           data={data}
-          xField={regressionScatterXField || activeSeriesFields[0]}
-          yField={regressionScatterYField || activeSeriesFields[1]}
-          seriesColors={seriesColors}
+          xField={regressionScatterXField || seriesFields[0]}
+          yField={regressionScatterYField || seriesFields[1]}
           themeColors={themeColors}
+          height={h}
+          onRegressionStats={onRegressionStatsChange}
           onTooltipChange={handleTooltipChange}
-          onStatsChange={onRegressionStatsChange}
         />
       );
     }
@@ -365,7 +399,7 @@ export function ChartWidget({
           if (hoveredData) {
             const payload: any[] = [];
             if (syncedAreaLeftField) {
-              const leftColorIdx = activeSeriesFields.indexOf(syncedAreaLeftField);
+              const leftColorIdx = seriesFields.indexOf(syncedAreaLeftField);
               payload.push({
                 dataKey: syncedAreaLeftField,
                 value: hoveredData[syncedAreaLeftField],
@@ -373,29 +407,25 @@ export function ChartWidget({
               });
             }
             if (syncedAreaRightField) {
-              const rightColorIdx = activeSeriesFields.indexOf(syncedAreaRightField);
+              const rightColorIdx = seriesFields.indexOf(syncedAreaRightField);
               payload.push({
                 dataKey: syncedAreaRightField,
                 value: hoveredData[syncedAreaRightField],
                 color: seriesColors[rightColorIdx % seriesColors.length],
               });
             }
-            handleTooltipChange(payload);
+            onTooltipChange?.(payload);
             onHoveredLabelChange?.(chartState.activeLabel);
           }
         }
       };
-
       const handleSyncedAreaMouseLeave = () => {
-        handleTooltipChange(null);
+        onTooltipChange?.(null);
         onHoveredLabelChange?.(null);
       };
 
-      const gridColor = themeColors?.gridColor || "hsl(0 0% 85%)";
-      const axisLineColor = getAxisLineColor();
-
       return (
-        <div className="flex gap-4 h-full">
+        <div className="flex gap-4" style={{ height: h }}>
           {/* 좌측 차트 */}
           <div className="flex-1 min-w-0">
             <ResponsiveContainer width="100%" height="100%">
@@ -406,17 +436,17 @@ export function ChartWidget({
                 onMouseMove={handleSyncedAreaMouseMove}
                 onMouseLeave={handleSyncedAreaMouseLeave}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} opacity={0.5} />
+                <CartesianGrid strokeDasharray="3 3" stroke={themeColors?.gridColor || "hsl(0 0% 85%)"} opacity={0.5} />
                 <XAxis
                   dataKey="date_display"
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickLine={false}
-                  axisLine={{ stroke: axisLineColor, strokeWidth: 1.5 }}
+                  axisLine={{ stroke: getAxisLineColor(), strokeWidth: 1.5 }}
                 />
                 <YAxis
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickLine={false}
-                  axisLine={{ stroke: axisLineColor, strokeWidth: 1.5 }}
+                  axisLine={{ stroke: getAxisLineColor(), strokeWidth: 1.5 }}
                   tickFormatter={(value) => {
                     if (typeof value === "number") {
                       if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
@@ -425,12 +455,9 @@ export function ChartWidget({
                     return value;
                   }}
                 />
-                <Tooltip
-                  cursor={{ stroke: themeColors?.textColor || "hsl(var(--foreground))", strokeOpacity: 0.15, strokeWidth: 1, strokeDasharray: "4 4" }}
-                  content={() => null}
-                />
+                <Tooltip cursor={{ stroke: themeColors?.textColor || "hsl(var(--foreground))", strokeOpacity: 0.15, strokeWidth: 1, strokeDasharray: "4 4" }} content={() => null} />
                 {syncedAreaLeftField && (() => {
-                  const colorIdx = activeSeriesFields.indexOf(syncedAreaLeftField);
+                  const colorIdx = seriesFields.indexOf(syncedAreaLeftField);
                   const color = seriesColors[colorIdx % seriesColors.length];
                   return (
                     <Area
@@ -459,17 +486,17 @@ export function ChartWidget({
                 onMouseMove={handleSyncedAreaMouseMove}
                 onMouseLeave={handleSyncedAreaMouseLeave}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} opacity={0.5} />
+                <CartesianGrid strokeDasharray="3 3" stroke={themeColors?.gridColor || "hsl(0 0% 85%)"} opacity={0.5} />
                 <XAxis
                   dataKey="date_display"
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickLine={false}
-                  axisLine={{ stroke: axisLineColor, strokeWidth: 1.5 }}
+                  axisLine={{ stroke: getAxisLineColor(), strokeWidth: 1.5 }}
                 />
                 <YAxis
                   tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                   tickLine={false}
-                  axisLine={{ stroke: axisLineColor, strokeWidth: 1.5 }}
+                  axisLine={{ stroke: getAxisLineColor(), strokeWidth: 1.5 }}
                   tickFormatter={(value) => {
                     if (typeof value === "number") {
                       if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
@@ -478,12 +505,9 @@ export function ChartWidget({
                     return value;
                   }}
                 />
-                <Tooltip
-                  cursor={{ stroke: themeColors?.textColor || "hsl(var(--foreground))", strokeOpacity: 0.15, strokeWidth: 1, strokeDasharray: "4 4" }}
-                  content={() => null}
-                />
+                <Tooltip cursor={{ stroke: themeColors?.textColor || "hsl(var(--foreground))", strokeOpacity: 0.15, strokeWidth: 1, strokeDasharray: "4 4" }} content={() => null} />
                 {syncedAreaRightField && (() => {
-                  const colorIdx = activeSeriesFields.indexOf(syncedAreaRightField);
+                  const colorIdx = seriesFields.indexOf(syncedAreaRightField);
                   const color = seriesColors[colorIdx % seriesColors.length];
                   return (
                     <Area
@@ -506,27 +530,50 @@ export function ChartWidget({
       );
     }
 
-    // 기본 차트 (line, area, column, stacked 등)
+    // 이상치 활성화 + 이상치 존재 시: 분할 차트
+    if (showOutliers && supportsOutliers && hasOutliers && analysisResult?.classifiedData) {
+      return (
+        <RechartsSplitWrapper
+          xField="date_display"
+          yFields={Array.from(enabledSeries)}
+          allSeriesFields={seriesFields}
+          chartType={chartType}
+          yFieldTypes={chartType === 'mixed' || chartType === 'dual-axis' ? yFieldTypes : undefined}
+          yAxisPlacements={chartType === 'dual-axis' ? yAxisPlacements : undefined}
+          themeColors={themeColors}
+          totalHeight={h}
+          classifiedData={analysisResult.classifiedData}
+          leftClassifiedData={chartType === 'dual-axis' ? analysisResult.leftClassifiedData : undefined}
+          rightClassifiedData={chartType === 'dual-axis' ? analysisResult.rightClassifiedData : undefined}
+          outliers={analysisResult.outliers}
+          fullData={data as any}
+          onTooltipChange={handleTooltipChange}
+          axisUnit={scenario?.unit}
+          leftAxisUnit={leftAxisUnit}
+          rightAxisUnit={rightAxisUnit}
+        />
+      );
+    }
+
+    // 일반 차트
     return (
       <RechartsWrapper
-        data={data}
-        seriesFields={activeSeriesFields}
-        enabledSeries={safeEnabledSeries}
-        seriesColors={seriesColors}
+        data={data as any}
+        xField="date_display"
+        yFields={Array.from(enabledSeries)}
+        allSeriesFields={seriesFields}
         chartType={chartType}
+        yFieldTypes={chartType === 'mixed' || chartType === 'dual-axis' ? yFieldTypes : undefined}
+        yAxisPlacements={chartType === 'dual-axis' ? yAxisPlacements : undefined}
+        seriesGroupAssignments={chartType === 'stacked-grouped' ? seriesGroupAssignments : undefined}
         themeColors={themeColors}
-        yFieldTypes={yFieldTypes}
-        yAxisPlacements={yAxisPlacements}
-        groupCount={groupCount}
-        seriesGroupAssignments={seriesGroupAssignments}
-        syncedAreaLeftField={syncedAreaLeftField}
-        syncedAreaRightField={syncedAreaRightField}
-        showMissingValues={effectiveShowMissing}
-        missingValues={analysisResult?.missingValues}
-        outlierScatterData={outlierScatterData}
-        showOutliers={effectiveShowOutliers}
+        height={h}
+        outlierData={showOutliers && supportsOutliers ? outlierScatterData : []}
+        showOutliers={showOutliers && supportsOutliers}
         onTooltipChange={handleTooltipChange}
-        onHoveredLabelChange={handleHoveredLabelChange}
+        axisUnit={chartType !== 'dual-axis' ? scenario?.unit : undefined}
+        leftAxisUnit={chartType === 'dual-axis' ? leftAxisUnit : undefined}
+        rightAxisUnit={chartType === 'dual-axis' ? rightAxisUnit : undefined}
       />
     );
   };
