@@ -522,106 +522,116 @@ function determineAllowedCharts(seriesCount: number, hasNegativeValues: boolean)
 // UI Components
 // ============================================================
 
-// 패싯 필터 (sectorbook PivotWidget.tsx 원본 복사)
+// 패싯 필터 - 분류기준 선택 방식
 interface FacetFilterProps {
   accountMappings: AccountMapping[];
-  selectedFilters: Map<number, string>;
-  onFilterChange: (level: number, value: string | null) => void;
+  selectedLevel: number | null;           // 활성화된 레벨
+  selectedCriterion: string | null;       // 활성화된 분류기준명
+  onCriterionSelect: (level: number, criterion: string) => void;
 }
 
 const FacetFilter: React.FC<FacetFilterProps> = ({
   accountMappings,
-  selectedFilters,
-  onFilterChange,
+  selectedLevel,
+  selectedCriterion,
+  onCriterionSelect,
 }) => {
-  // 레벨별 분류기준과 값 추출
-  const facets = useMemo(() => {
-    const result: { level: number; criterion: string; values: Set<string> }[] = [];
+  // 레벨별 분류기준들과 값들 추출
+  const levelData = useMemo(() => {
+    // 레벨 -> 분류기준 -> 값들
+    const levelMap = new Map<number, Map<string, Set<string>>>();
+    let maxLevel = 0;
 
-    // 각 매핑의 criteriaPath/path를 분석
     for (const mapping of accountMappings) {
       const { criteriaPath, path } = mapping;
+      maxLevel = Math.max(maxLevel, criteriaPath.length - 1);
 
       for (let level = 0; level < criteriaPath.length; level++) {
         const criterion = criteriaPath[level];
         const value = path[level];
         if (!criterion || !value) continue;
 
-        // 상위 레벨 필터가 적용된 경우, 해당 경로와 일치하는지 확인
-        let matchesFilter = true;
-        for (let i = 0; i < level; i++) {
-          const selectedValue = selectedFilters.get(i);
-          if (selectedValue && path[i] !== selectedValue) {
-            matchesFilter = false;
-            break;
-          }
+        if (!levelMap.has(level)) {
+          levelMap.set(level, new Map());
         }
-        if (!matchesFilter) continue;
-
-        // 해당 레벨의 facet 찾거나 생성
-        let facet = result.find(f => f.level === level);
-        if (!facet) {
-          facet = { level, criterion, values: new Set() };
-          result.push(facet);
+        const criterionMap = levelMap.get(level)!;
+        if (!criterionMap.has(criterion)) {
+          criterionMap.set(criterion, new Set());
         }
-        facet.values.add(value);
+        criterionMap.get(criterion)!.add(value);
       }
     }
 
-    // 레벨순 정렬
-    result.sort((a, b) => a.level - b.level);
-    return result;
-  }, [accountMappings, selectedFilters]);
+    // 정렬된 배열로 변환
+    const result: {
+      level: number;
+      criteria: { name: string; values: string[]; isActive: boolean; isDim: boolean }[];
+    }[] = [];
 
-  if (facets.length === 0) return null;
+    for (let level = 0; level <= maxLevel; level++) {
+      const criterionMap = levelMap.get(level);
+      if (!criterionMap) continue;
+
+      const criteria: { name: string; values: string[]; isActive: boolean; isDim: boolean }[] = [];
+      for (const [criterion, values] of criterionMap.entries()) {
+        const isActive = selectedLevel === level && selectedCriterion === criterion;
+        // dim 조건: 같은 레벨에 다른 기준이 활성화됨, 또는 하위 레벨
+        const isDim = (selectedLevel !== null && selectedLevel < level) ||
+                      (selectedLevel === level && selectedCriterion !== null && selectedCriterion !== criterion);
+        criteria.push({
+          name: criterion,
+          values: Array.from(values).sort(),
+          isActive,
+          isDim,
+        });
+      }
+      result.push({ level, criteria });
+    }
+
+    return result;
+  }, [accountMappings, selectedLevel, selectedCriterion]);
+
+  // 상위 레벨 값 요약 생성
+  const getValueSummary = (values: string[]): string => {
+    if (values.length === 0) return '';
+    if (values.length === 1) return values[0];
+    return `${values[0]}외${values.length - 1}개`;
+  };
+
+  if (levelData.length === 0) return null;
 
   return (
-    <div className="space-y-2 mb-3">
-      {facets.map(({ level, criterion, values }) => {
-        const selectedValue = selectedFilters.get(level);
-        const valuesArray = Array.from(values).sort();
+    <div className="space-y-1">
+      {levelData.map(({ level, criteria }) => (
+        <div key={level} className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-400 w-8">L{level + 1}:</span>
+          {criteria.map(({ name, values, isActive, isDim }) => {
+            const criterionName = name.replace(/별$/, '');
+            // 상위 레벨이면 값 요약 표시
+            const showSummary = selectedLevel !== null && level < selectedLevel;
+            const displayText = showSummary
+              ? `${criterionName}(${getValueSummary(values)})`
+              : criterionName;
 
-        return (
-          <div key={level} className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-violet-600 min-w-[60px]">
-              {criterion.replace(/별$/, '')}:
-            </span>
-            <div className="flex flex-wrap gap-1">
-              {valuesArray.map(value => {
-                const isSelected = selectedValue === value;
-                return (
-                  <button
-                    key={value}
-                    onClick={() => onFilterChange(level, isSelected ? null : value)}
-                    className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
-                      isSelected
-                        ? 'bg-violet-500 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
-                    }`}
-                  >
-                    {value}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
-
-      {/* 필터 초기화 버튼 */}
-      {selectedFilters.size > 0 && (
-        <button
-          onClick={() => {
-            // 모든 필터 해제
-            for (const level of selectedFilters.keys()) {
-              onFilterChange(level, null);
-            }
-          }}
-          className="text-xs text-gray-400 hover:text-gray-600"
-        >
-          필터 초기화
-        </button>
-      )}
+            return (
+              <button
+                key={name}
+                onClick={() => !isDim && onCriterionSelect(level, name)}
+                disabled={isDim}
+                className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                  isActive
+                    ? 'bg-violet-500 text-white'
+                    : isDim
+                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                      : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
+                }`}
+              >
+                {displayText}
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 };
@@ -664,60 +674,46 @@ export default function App() {
     [dataSeed]
   );
 
-  // 선택된 시나리오 ID
-  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  // 선택된 분류기준 (레벨, 기준명)
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(null);
+  const [selectedCriterion, setSelectedCriterion] = useState<string | null>(null);
 
-  // 패싯 필터
-  const [selectedFilters, setSelectedFilters] = useState<Map<number, string>>(new Map());
+  // 분류기준 선택 핸들러
+  const handleCriterionSelect = useCallback((level: number, criterion: string) => {
+    setSelectedLevel(level);
+    setSelectedCriterion(criterion);
+  }, []);
 
-  // 필터링된 시나리오
-  const filteredScenarios = useMemo(() => {
-    if (selectedFilters.size === 0) return scenarioCandidates;
-
-    return scenarioCandidates.filter((candidate) => {
-      // 시나리오에 연결된 원본 계정항목들 확인
-      // 해당 시나리오의 원본들 중 하나라도 모든 필터 조건을 만족하면 통과
-      const hasMatchingOriginal = candidate.originals.some(original => {
-        const mapping = accountMappings.find(m => m.original === original);
-        if (!mapping) return false;
-
-        // 모든 필터 레벨 확인
-        for (const [level, filterValue] of selectedFilters.entries()) {
-          // 해당 레벨의 값이 필터와 일치하는지
-          if (mapping.path[level] !== filterValue) {
-            return false;
-          }
-        }
-        return true;
-      });
-
-      if (hasMatchingOriginal) return true;
-
-      // 시나리오의 series에 필터 값이 포함되어 있는지 (마지막 레벨용)
-      for (const [, filterValue] of selectedFilters.entries()) {
-        if (candidate.series.includes(filterValue)) return true;
-      }
-
-      return false;
-    });
-  }, [scenarioCandidates, selectedFilters, accountMappings]);
-
-  // 선택된 시나리오
+  // 선택된 분류기준에 해당하는 시나리오 찾기
   const selectedScenario = useMemo(() => {
-    const found = scenarioCandidates.find(s => s.id === selectedScenarioId);
-    return found || filteredScenarios[0] || null;
-  }, [scenarioCandidates, selectedScenarioId, filteredScenarios]);
+    if (selectedLevel === null || selectedCriterion === null) {
+      // 기본: 첫 번째 시나리오 (가장 깊은 레벨)
+      return scenarioCandidates[0] || null;
+    }
 
-  // 필터 변경 또는 첫 렌더링 시 첫 번째 필터링된 시나리오 선택
+    // 해당 레벨의 분류기준과 일치하는 시나리오 찾기
+    const matching = scenarioCandidates.find(candidate => {
+      // 시나리오의 레벨과 기준명 확인
+      const criterionName = selectedCriterion.replace(/별$/, '');
+      return candidate.name.includes(criterionName) ||
+             candidate.aggregationLevel.includes(criterionName);
+    });
+
+    return matching || scenarioCandidates[0] || null;
+  }, [scenarioCandidates, selectedLevel, selectedCriterion]);
+
+  // 첫 렌더링 시 기본 분류기준 선택 (마지막 레벨)
   useEffect(() => {
-    if (filteredScenarios.length > 0) {
-      // 현재 선택된 시나리오가 필터링된 목록에 없으면 첫 번째로 변경
-      const currentInFiltered = filteredScenarios.find(s => s.id === selectedScenarioId);
-      if (!currentInFiltered) {
-        setSelectedScenarioId(filteredScenarios[0].id);
+    if (selectedLevel === null && accountMappings.length > 0) {
+      // 가장 깊은 레벨의 첫 번째 분류기준 선택
+      const maxLevel = Math.max(...accountMappings.map(m => m.criteriaPath.length - 1));
+      const firstCriterion = accountMappings.find(m => m.criteriaPath.length - 1 === maxLevel)?.criteriaPath[maxLevel];
+      if (firstCriterion) {
+        setSelectedLevel(maxLevel);
+        setSelectedCriterion(firstCriterion);
       }
     }
-  }, [filteredScenarios, selectedScenarioId]);
+  }, [accountMappings, selectedLevel]);
 
   // 차트 상태
   const [chartType, setChartType] = useState<ChartType>("column");
@@ -793,27 +789,6 @@ export default function App() {
       : ["hsl(12, 76%, 61%)", "hsl(173, 58%, 39%)", "hsl(197, 37%, 24%)", "hsl(43, 74%, 66%)", "hsl(27, 87%, 67%)"];
     return expandSeriesColors(baseColors, seriesFields.length);
   }, [themeColors.seriesColors, seriesFields.length]);
-
-  // 필터 변경 핸들러 (sectorbook 동일)
-  const handleFilterChange = useCallback((level: number, value: string | null) => {
-    setSelectedFilters(prev => {
-      const next = new Map(prev);
-      if (value === null) {
-        next.delete(level);
-        // 하위 레벨 필터도 모두 해제
-        for (const key of next.keys()) {
-          if (key > level) next.delete(key);
-        }
-      } else {
-        next.set(level, value);
-        // 하위 레벨 필터 해제 (상위가 변경되면 하위는 무효화)
-        for (const key of next.keys()) {
-          if (key > level) next.delete(key);
-        }
-      }
-      return next;
-    });
-  }, []);
 
   const toggleSeries = useCallback((field: string) => {
     setEnabledSeries(prev => {
@@ -938,8 +913,9 @@ export default function App() {
             <div className="flex-shrink-0 px-3 py-2 border-b bg-muted/30">
               <FacetFilter
                 accountMappings={accountMappings}
-                selectedFilters={selectedFilters}
-                onFilterChange={handleFilterChange}
+                selectedLevel={selectedLevel}
+                selectedCriterion={selectedCriterion}
+                onCriterionSelect={handleCriterionSelect}
               />
             </div>
           )}
