@@ -539,6 +539,7 @@ interface FacetFilterProps {
   accountMappings: AccountMapping[];
   selectedLevel: number | null;           // 활성화된 레벨
   selectedCriterion: string | null;       // 활성화된 분류기준명
+  selectedParentValues: string[];         // 선택된 시나리오의 상위 값들
   onCriterionSelect: (level: number, criterion: string) => void;
 }
 
@@ -546,6 +547,7 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   accountMappings,
   selectedLevel,
   selectedCriterion,
+  selectedParentValues,
   onCriterionSelect,
 }) => {
   // 레벨별 분류기준들과 값들 추출
@@ -618,10 +620,11 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
           <span className="text-xs text-gray-400 w-8">L{level + 1}:</span>
           {criteria.map(({ name, values, isActive, isDim }) => {
             const criterionName = name.replace(/별$/, '');
-            // 상위 레벨이면 값 요약 표시
-            const showSummary = selectedLevel !== null && level < selectedLevel;
-            const displayText = showSummary
-              ? `${criterionName}(${getValueSummary(values)})`
+            // 상위 레벨이면 선택된 시나리오의 부모값 표시
+            const isUpperLevel = selectedLevel !== null && level < selectedLevel;
+            const parentValue = selectedParentValues[level];
+            const displayText = isUpperLevel && parentValue
+              ? `${criterionName}(${parentValue})`
               : criterionName;
 
             return (
@@ -925,6 +928,7 @@ export default function App() {
                 accountMappings={accountMappings}
                 selectedLevel={selectedLevel}
                 selectedCriterion={selectedCriterion}
+                selectedParentValues={selectedScenario?.parentValues || []}
                 onCriterionSelect={handleCriterionSelect}
               />
             </div>
