@@ -350,11 +350,11 @@ function generateScenarioCandidatesFromMappings(
     }
   }
 
-  // 각 그룹에서 시나리오 생성 (시리즈가 2개 이상인 경우만)
+  // 각 그룹에서 시나리오 생성 (시리즈가 1개 이상이면 표시)
   for (const [groupKey, group] of groups.entries()) {
     const { criterionPath, level, parentValuePath, seriesValues, seriesMappings } = group;
 
-    if (seriesValues.size < 2) continue;
+    if (seriesValues.size < 1) continue;
 
     // 시나리오명
     const scenarioName = criterionPath
@@ -572,11 +572,17 @@ const ClassificationTable: React.FC<ClassificationTableProps> = ({ mappings }) =
   );
 };
 
-// 패싯 필터 (sectorbook 스타일 - 수평 필 버튼)
+// 패싯 필터 (개선버전 - 하위레벨 선택시 상위 자동선택, 분류기준명(분류값) 표기)
 interface FacetFilterProps {
   accountMappings: AccountMapping[];
   selectedFilters: Map<number, string>;
-  onFilterChange: (level: number, value: string | null) => void;
+  onFilterChange: (level: number, value: string | null, autoSelectParents?: { level: number; value: string }[]) => void;
+}
+
+// 값과 그 부모 경로를 함께 저장하는 구조
+interface FacetValue {
+  value: string;
+  parentPath: string[];  // 이 값에 도달하기 위한 상위 레벨 값들
 }
 
 const FacetFilter: React.FC<FacetFilterProps> = ({
@@ -584,9 +590,13 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   selectedFilters,
   onFilterChange,
 }) => {
-  // 레벨별 분류기준과 값 추출
+  // 레벨별 분류기준과 값 추출 (부모 경로 포함)
   const facets = useMemo(() => {
-    const result: { level: number; criterion: string; values: Set<string> }[] = [];
+    const result: {
+      level: number;
+      criterion: string;
+      values: Map<string, FacetValue>;  // value -> { value, parentPath }
+    }[] = [];
 
     for (const mapping of accountMappings) {
       const { criteriaPath, path } = mapping;
@@ -596,7 +606,7 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         const value = path[level];
         if (!criterion || !value) continue;
 
-        // 상위 레벨 필터 확인
+        // 상위 레벨 필터가 있으면 해당 경로만 표시
         let matchesFilter = true;
         for (let i = 0; i < level; i++) {
           const selectedValue = selectedFilters.get(i);
@@ -609,10 +619,17 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
 
         let facet = result.find(f => f.level === level);
         if (!facet) {
-          facet = { level, criterion, values: new Set() };
+          facet = { level, criterion, values: new Map() };
           result.push(facet);
         }
-        facet.values.add(value);
+
+        // 값과 부모 경로 저장
+        if (!facet.values.has(value)) {
+          facet.values.set(value, {
+            value,
+            parentPath: path.slice(0, level),  // 상위 레벨 값들
+          });
+        }
       }
     }
 
@@ -620,33 +637,69 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
     return result;
   }, [accountMappings, selectedFilters]);
 
+  // 3단계 클릭 시 1,2단계 자동선택 핸들러
+  const handleValueClick = useCallback((level: number, facetValue: FacetValue, isSelected: boolean) => {
+    if (isSelected) {
+      // 선택 해제
+      onFilterChange(level, null);
+    } else {
+      // 선택 - 상위 레벨 자동 선택
+      const autoSelectParents: { level: number; value: string }[] = [];
+      facetValue.parentPath.forEach((parentValue, idx) => {
+        autoSelectParents.push({ level: idx, value: parentValue });
+      });
+      onFilterChange(level, facetValue.value, autoSelectParents);
+    }
+  }, [onFilterChange]);
+
   if (facets.length === 0) return null;
 
   return (
     <div className="space-y-2">
       {facets.map(({ level, criterion, values }) => {
         const selectedValue = selectedFilters.get(level);
-        const valuesArray = Array.from(values).sort();
+        const valuesArray = Array.from(values.values()).sort((a, b) => a.value.localeCompare(b.value));
+        const criterionName = criterion.replace(/별$/, '');
 
         return (
           <div key={level} className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-violet-600 min-w-[60px]">
-              {criterion.replace(/별$/, '')}:
-            </span>
+            {/* 분류기준명 클릭 가능 - 해당 레벨 전체 선택/해제 */}
+            <button
+              onClick={() => {
+                // 해당 레벨이 선택되어 있으면 해제, 아니면 첫 번째 값 선택
+                if (selectedValue) {
+                  onFilterChange(level, null);
+                } else if (valuesArray.length > 0) {
+                  handleValueClick(level, valuesArray[0], false);
+                }
+              }}
+              className={`text-xs font-medium min-w-[60px] px-2 py-0.5 rounded transition-colors ${
+                selectedValue
+                  ? 'bg-violet-100 text-violet-700'
+                  : 'text-violet-600 hover:bg-violet-50'
+              }`}
+            >
+              {criterionName}:
+            </button>
             <div className="flex flex-wrap gap-1">
-              {valuesArray.map(value => {
-                const isSelected = selectedValue === value;
+              {valuesArray.map(facetValue => {
+                const isSelected = selectedValue === facetValue.value;
+                // 분류기준명(분류값) 형식으로 표시 - 부모가 있을 때만
+                const displayLabel = level > 0 && facetValue.parentPath.length > 0
+                  ? `${facetValue.parentPath[facetValue.parentPath.length - 1]}(${facetValue.value})`
+                  : facetValue.value;
+
                 return (
                   <button
-                    key={value}
-                    onClick={() => onFilterChange(level, isSelected ? null : value)}
+                    key={facetValue.value}
+                    onClick={() => handleValueClick(level, facetValue, isSelected)}
                     className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
                       isSelected
                         ? 'bg-violet-500 text-white'
                         : 'bg-muted text-muted-foreground hover:bg-violet-100 hover:text-violet-700'
                     }`}
                   >
-                    {value}
+                    {displayLabel}
                   </button>
                 );
               })}
@@ -655,17 +708,33 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         );
       })}
 
+      {/* 선택된 필터 경로 표시 */}
       {selectedFilters.size > 0 && (
-        <button
-          onClick={() => {
-            for (const level of selectedFilters.keys()) {
-              onFilterChange(level, null);
-            }
-          }}
-          className="text-xs text-muted-foreground hover:text-foreground"
-        >
-          필터 초기화
-        </button>
+        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+          <span className="text-xs text-muted-foreground">선택:</span>
+          <div className="flex items-center gap-1">
+            {Array.from(selectedFilters.entries())
+              .sort(([a], [b]) => a - b)
+              .map(([level, value], idx, arr) => (
+                <React.Fragment key={level}>
+                  <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">
+                    {value}
+                  </span>
+                  {idx < arr.length - 1 && <span className="text-xs text-muted-foreground">›</span>}
+                </React.Fragment>
+              ))}
+          </div>
+          <button
+            onClick={() => {
+              for (const level of selectedFilters.keys()) {
+                onFilterChange(level, null);
+              }
+            }}
+            className="text-xs text-muted-foreground hover:text-foreground ml-auto"
+          >
+            초기화
+          </button>
+        </div>
       )}
     </div>
   );
@@ -944,17 +1013,30 @@ export default function App() {
     return expandSeriesColors(baseColors, seriesFields.length);
   }, [themeColors.seriesColors, seriesFields.length]);
 
-  // 콜백들
-  const handleFilterChange = useCallback((level: number, value: string | null) => {
+  // 콜백들 - 3단계 클릭 시 1,2단계 자동선택 지원
+  const handleFilterChange = useCallback((
+    level: number,
+    value: string | null,
+    autoSelectParents?: { level: number; value: string }[]
+  ) => {
     setSelectedFilters(prev => {
       const next = new Map(prev);
+
       if (value === null) {
+        // 선택 해제 - 해당 레벨과 하위 레벨 모두 해제
         next.delete(level);
         for (const key of next.keys()) {
           if (key > level) next.delete(key);
         }
       } else {
+        // 선택 - 상위 레벨 자동 선택
+        if (autoSelectParents && autoSelectParents.length > 0) {
+          for (const parent of autoSelectParents) {
+            next.set(parent.level, parent.value);
+          }
+        }
         next.set(level, value);
+        // 하위 레벨 해제
         for (const key of next.keys()) {
           if (key > level) next.delete(key);
         }
