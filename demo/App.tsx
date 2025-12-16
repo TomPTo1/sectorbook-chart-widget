@@ -75,16 +75,17 @@ interface PivotScenario {
 }
 
 // ============================================================
-// 분류 계층 정의 (브랜치 구조)
+// 분류 계층 정의 (재귀적 브랜치 구조 - 무한 깊이 지원)
 // ============================================================
 interface ClassificationBranch {
   criterion: string;      // 분류 기준 (예: "업종별")
   values: {
     name: string;         // 값 (예: "제조업")
-    children?: ClassificationBranch;  // 하위 분류
+    children?: ClassificationBranch;  // 하위 분류 (재귀)
   }[];
 }
 
+// 3~4단계 깊이를 가진 다양한 분류 트리
 const CLASSIFICATION_TREE: ClassificationBranch[] = [
   {
     criterion: "업종별",
@@ -94,11 +95,31 @@ const CLASSIFICATION_TREE: ClassificationBranch[] = [
         children: {
           criterion: "산업별",
           values: [
-            { name: "자동차" },
-            { name: "반도체" },
+            {
+              name: "자동차",
+              children: {
+                criterion: "차종별",
+                values: [
+                  { name: "승용차" },
+                  { name: "SUV" },
+                  { name: "트럭" },
+                  { name: "버스" },
+                ],
+              },
+            },
+            {
+              name: "반도체",
+              children: {
+                criterion: "반도체유형별",
+                values: [
+                  { name: "메모리" },
+                  { name: "시스템반도체" },
+                  { name: "파운드리" },
+                ],
+              },
+            },
             { name: "철강" },
             { name: "조선" },
-            { name: "섬유" },
           ],
         },
       },
@@ -107,11 +128,20 @@ const CLASSIFICATION_TREE: ClassificationBranch[] = [
         children: {
           criterion: "업태별",
           values: [
-            { name: "금융" },
+            {
+              name: "금융",
+              children: {
+                criterion: "금융업종별",
+                values: [
+                  { name: "은행" },
+                  { name: "증권" },
+                  { name: "보험" },
+                  { name: "자산운용" },
+                ],
+              },
+            },
             { name: "통신" },
             { name: "유통" },
-            { name: "관광" },
-            { name: "의료" },
           ],
         },
       },
@@ -136,7 +166,18 @@ const CLASSIFICATION_TREE: ClassificationBranch[] = [
         children: {
           criterion: "시도별",
           values: [
-            { name: "서울" },
+            {
+              name: "서울",
+              children: {
+                criterion: "권역별",
+                values: [
+                  { name: "강남권" },
+                  { name: "강북권" },
+                  { name: "서부권" },
+                  { name: "동부권" },
+                ],
+              },
+            },
             { name: "경기" },
             { name: "인천" },
           ],
@@ -176,8 +217,29 @@ const CLASSIFICATION_TREE: ClassificationBranch[] = [
         children: {
           criterion: "에너지원별",
           values: [
-            { name: "석유" },
-            { name: "가스" },
+            {
+              name: "석유",
+              children: {
+                criterion: "유종별",
+                values: [
+                  { name: "휘발유" },
+                  { name: "경유" },
+                  { name: "등유" },
+                  { name: "중유" },
+                ],
+              },
+            },
+            {
+              name: "가스",
+              children: {
+                criterion: "가스유형별",
+                values: [
+                  { name: "LNG" },
+                  { name: "LPG" },
+                  { name: "PNG" },
+                ],
+              },
+            },
             { name: "석탄" },
             { name: "전력" },
           ],
@@ -188,9 +250,19 @@ const CLASSIFICATION_TREE: ClassificationBranch[] = [
         children: {
           criterion: "금속종류별",
           values: [
+            {
+              name: "귀금속",
+              children: {
+                criterion: "귀금속유형별",
+                values: [
+                  { name: "금" },
+                  { name: "은" },
+                  { name: "백금" },
+                ],
+              },
+            },
             { name: "철강" },
             { name: "비철금속" },
-            { name: "귀금속" },
           ],
         },
       },
@@ -239,50 +311,53 @@ function generateDataFromClassificationTree(seed: number): GeneratedData {
   const accountMappings: AccountMapping[] = [];
   let accountIndex = 0;
 
+  // 재귀적으로 분류 트리 탐색하여 AccountMapping 생성
+  function traverseBranch(
+    branch: ClassificationBranch,
+    valuePath: string[],
+    criteriaPath: string[],
+    unit: string
+  ): void {
+    const currentCriterion = branch.criterion;
+    const newCriteriaPath = [...criteriaPath, currentCriterion];
+
+    // 값들 중 일부 랜덤 선택
+    const selectCount = Math.min(Math.floor(random() * 3) + 2, branch.values.length);
+    const shuffledValues = [...branch.values].sort(() => random() - 0.5);
+    const selectedValues = shuffledValues.slice(0, selectCount);
+
+    for (const value of selectedValues) {
+      const newValuePath = [...valuePath, value.name];
+      const displayPath = newValuePath.join(' > ');
+
+      // 하위 분류가 있고, 랜덤으로 더 깊이 탐색할지 결정
+      const shouldDrillDown = value.children && random() > 0.25;
+
+      if (shouldDrillDown && value.children) {
+        // 재귀적으로 하위 분류 탐색
+        traverseBranch(value.children, newValuePath, newCriteriaPath, unit);
+      } else {
+        // 현재 레벨에서 계정항목 생성
+        accountMappings.push({
+          original: `${value.name}_${++accountIndex}`,
+          unit,
+          path: newValuePath,
+          criteriaPath: newCriteriaPath,
+          displayPath,
+        });
+      }
+    }
+  }
+
   // 1~2개 분류 트리 선택
   const treeCount = Math.floor(random() * 2) + 1;
   const shuffledTrees = [...CLASSIFICATION_TREE].sort(() => random() - 0.5);
   const selectedTrees = shuffledTrees.slice(0, treeCount);
 
-  // 각 트리에서 AccountMapping 생성
+  // 각 트리에서 재귀적으로 AccountMapping 생성
   for (const tree of selectedTrees) {
-    const criterion1 = tree.criterion;  // 예: "업종별"
-
-    // Level 1 값들 중 일부 선택
-    const l1Count = Math.min(Math.floor(random() * 3) + 2, tree.values.length);
-    const shuffledL1 = [...tree.values].sort(() => random() - 0.5);
-    const selectedL1 = shuffledL1.slice(0, l1Count);
-
-    for (const l1Value of selectedL1) {
-      const unit = UNIT_POOL[Math.floor(random() * UNIT_POOL.length)];
-
-      if (l1Value.children && random() > 0.3) {
-        // Level 2가 있으면 하위 분류로 계정항목 생성
-        const criterion2 = l1Value.children.criterion;  // 예: "산업별"
-        const l2Count = Math.min(Math.floor(random() * 4) + 2, l1Value.children.values.length);
-        const shuffledL2 = [...l1Value.children.values].sort(() => random() - 0.5);
-        const selectedL2 = shuffledL2.slice(0, l2Count);
-
-        for (const l2Value of selectedL2) {
-          accountMappings.push({
-            original: `${l2Value.name}_${++accountIndex}`,
-            unit,
-            path: [l1Value.name, l2Value.name],
-            criteriaPath: [criterion1, criterion2],
-            displayPath: `${l1Value.name} > ${l2Value.name}`,
-          });
-        }
-      } else {
-        // Level 1에서만 계정항목 생성
-        accountMappings.push({
-          original: `${l1Value.name}_${++accountIndex}`,
-          unit,
-          path: [l1Value.name],
-          criteriaPath: [criterion1],
-          displayPath: l1Value.name,
-        });
-      }
-    }
+    const unit = UNIT_POOL[Math.floor(random() * UNIT_POOL.length)];
+    traverseBranch(tree, [], [], unit);
   }
 
   // AccountMapping으로부터 ScenarioCandidate 생성 (sectorbook 로직)
