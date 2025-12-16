@@ -694,6 +694,16 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
 
   if (levelData.length === 0) return null;
 
+  // 이 기준이 선택된 경로에 속하는지 확인하는 함수
+  const criterionBelongsToSelectedPath = (level: number, parentPaths: string[]): boolean => {
+    if (selectedLevel === null || selectedParentValues.length === 0) return true;
+    if (level === 0) return true; // L1은 항상 속함
+
+    // 선택된 경로의 상위 부분과 비교
+    const selectedPathUpToLevel = selectedParentValues.slice(0, level).join('/');
+    return parentPaths.some(pp => pp === selectedPathUpToLevel || pp.startsWith(selectedPathUpToLevel));
+  };
+
   return (
     <div className="space-y-1">
       {levelData.map(({ level, criteria }) => (
@@ -702,20 +712,18 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
           {criteria.map(({ name, values, parentPaths, isActive }) => {
             const criterionName = name.replace(/별$/, '');
 
+            // dim 조건: 선택된 경로에 속하지 않는 기준
+            const belongsToPath = criterionBelongsToSelectedPath(level, parentPaths);
+            const isDim = selectedLevel !== null && !isActive && !belongsToPath;
+
             // 상위 레벨이면서, 이 기준이 선택된 경로에 속하는 경우에만 부모값 표시
             const isUpperLevel = selectedLevel !== null && level < selectedLevel;
             let displayText = criterionName;
 
-            if (isUpperLevel && selectedParentValues.length > level) {
-              // 이 기준이 선택된 경로에 속하는지 확인
-              const selectedPathUpToLevel = selectedParentValues.slice(0, level).join('/');
-              const criterionBelongsToPath = level === 0 || parentPaths.some(pp => pp === selectedPathUpToLevel || pp.startsWith(selectedPathUpToLevel + '/'));
-
-              if (criterionBelongsToPath) {
-                const parentValue = selectedParentValues[level];
-                if (parentValue) {
-                  displayText = `${criterionName}(${parentValue})`;
-                }
+            if (isUpperLevel && belongsToPath && selectedParentValues.length > level) {
+              const parentValue = selectedParentValues[level];
+              if (parentValue) {
+                displayText = `${criterionName}(${parentValue})`;
               }
             }
 
@@ -726,7 +734,9 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
                 className={`text-xs px-2 py-0.5 rounded transition-colors ${
                   isActive
                     ? 'bg-violet-500 text-white'
-                    : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
+                    : isDim
+                      ? 'bg-gray-50 text-gray-300'
+                      : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
                 }`}
               >
                 {displayText}
