@@ -625,10 +625,11 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   selectedParentValues,
   onCriterionSelect,
 }) => {
-  // 레벨별 분류기준들과 값들 추출
+  // 레벨별 분류기준들과 값들 추출 (경로 정보 포함)
   const levelData = useMemo(() => {
-    // 레벨 -> 분류기준 -> 값들
-    const levelMap = new Map<number, Map<string, Set<string>>>();
+    // 레벨 -> 분류기준 -> { values, parentPaths }
+    // parentPaths: 이 기준이 속한 상위 경로들의 집합
+    const levelMap = new Map<number, Map<string, { values: Set<string>; parentPaths: Set<string> }>>();
     let maxLevel = 0;
 
     for (const mapping of accountMappings) {
@@ -645,32 +646,37 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         }
         const criterionMap = levelMap.get(level)!;
         if (!criterionMap.has(criterion)) {
-          criterionMap.set(criterion, new Set());
+          criterionMap.set(criterion, { values: new Set(), parentPaths: new Set() });
         }
-        criterionMap.get(criterion)!.add(value);
+        const entry = criterionMap.get(criterion)!;
+        entry.values.add(value);
+
+        // 상위 경로 저장 (level 0은 상위 경로 없음)
+        if (level > 0) {
+          const parentPath = path.slice(0, level).join('/');
+          entry.parentPaths.add(parentPath);
+        }
       }
     }
 
     // 정렬된 배열로 변환
     const result: {
       level: number;
-      criteria: { name: string; values: string[]; isActive: boolean; isDim: boolean }[];
+      criteria: { name: string; values: string[]; parentPaths: string[]; isActive: boolean }[];
     }[] = [];
 
     for (let level = 0; level <= maxLevel; level++) {
       const criterionMap = levelMap.get(level);
       if (!criterionMap) continue;
 
-      const criteria: { name: string; values: string[]; isActive: boolean; isDim: boolean }[] = [];
-      for (const [criterion, values] of criterionMap.entries()) {
+      const criteria: { name: string; values: string[]; parentPaths: string[]; isActive: boolean }[] = [];
+      for (const [criterion, { values, parentPaths }] of criterionMap.entries()) {
         const isActive = selectedLevel === level && selectedCriterion === criterion;
-        // dim 없음 - 모든 분류기준 자유롭게 선택 가능
-        const isDim = false;
         criteria.push({
           name: criterion,
           values: Array.from(values).sort(),
+          parentPaths: Array.from(parentPaths),
           isActive,
-          isDim,
         });
       }
       result.push({ level, criteria });
@@ -693,14 +699,25 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
       {levelData.map(({ level, criteria }) => (
         <div key={level} className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-gray-400 w-8">L{level + 1}:</span>
-          {criteria.map(({ name, values, isActive, isDim }) => {
+          {criteria.map(({ name, values, parentPaths, isActive }) => {
             const criterionName = name.replace(/별$/, '');
-            // 상위 레벨이면 선택된 시나리오의 부모값 표시
+
+            // 상위 레벨이면서, 이 기준이 선택된 경로에 속하는 경우에만 부모값 표시
             const isUpperLevel = selectedLevel !== null && level < selectedLevel;
-            const parentValue = selectedParentValues[level];
-            const displayText = isUpperLevel && parentValue
-              ? `${criterionName}(${parentValue})`
-              : criterionName;
+            let displayText = criterionName;
+
+            if (isUpperLevel && selectedParentValues.length > level) {
+              // 이 기준이 선택된 경로에 속하는지 확인
+              const selectedPathUpToLevel = selectedParentValues.slice(0, level).join('/');
+              const criterionBelongsToPath = level === 0 || parentPaths.some(pp => pp === selectedPathUpToLevel || pp.startsWith(selectedPathUpToLevel + '/'));
+
+              if (criterionBelongsToPath) {
+                const parentValue = selectedParentValues[level];
+                if (parentValue) {
+                  displayText = `${criterionName}(${parentValue})`;
+                }
+              }
+            }
 
             return (
               <button
