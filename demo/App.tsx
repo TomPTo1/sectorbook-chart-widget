@@ -522,7 +522,7 @@ function determineAllowedCharts(seriesCount: number, hasNegativeValues: boolean)
 // UI Components
 // ============================================================
 
-// 패싯 필터 (sectorbook PivotWidget.tsx 동일 구현)
+// 패싯 필터 - 분류기준명(선택값) 형식
 interface FacetFilterProps {
   accountMappings: AccountMapping[];
   selectedFilters: Map<number, string>;
@@ -534,6 +534,8 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   selectedFilters,
   onFilterChange,
 }) => {
+  const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
+
   // 레벨별 분류기준과 값 추출
   const facets = useMemo(() => {
     const result: { level: number; criterion: string; values: Set<string> }[] = [];
@@ -574,34 +576,53 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   if (facets.length === 0) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="flex items-center gap-2 flex-wrap">
       {facets.map(({ level, criterion, values }) => {
         const selectedValue = selectedFilters.get(level);
         const valuesArray = Array.from(values).sort();
+        const criterionName = criterion.replace(/별$/, '');
+        const isExpanded = expandedLevel === level;
 
         return (
-          <div key={level} className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-medium text-violet-600 min-w-[60px]">
-              {criterion.replace(/별$/, '')}:
-            </span>
-            <div className="flex flex-wrap gap-1">
-              {valuesArray.map(value => {
-                const isSelected = selectedValue === value;
-                return (
+          <div key={level} className="relative">
+            <button
+              onClick={() => {
+                if (selectedValue) {
+                  // 이미 선택됨 - 해제
+                  onFilterChange(level, null);
+                  setExpandedLevel(null);
+                } else {
+                  // 드롭다운 토글
+                  setExpandedLevel(isExpanded ? null : level);
+                }
+              }}
+              className={`text-xs px-2 py-1 rounded transition-colors ${
+                selectedValue
+                  ? 'bg-violet-500 text-white'
+                  : 'bg-gray-100 text-gray-600 hover:bg-violet-100'
+              }`}
+            >
+              {selectedValue ? `${criterionName}(${selectedValue})` : criterionName}
+              {!selectedValue && valuesArray.length > 1 && <span className="ml-1 opacity-50">▼</span>}
+            </button>
+
+            {/* 드롭다운 */}
+            {isExpanded && !selectedValue && valuesArray.length > 0 && (
+              <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg z-10 min-w-[100px] max-h-[200px] overflow-y-auto">
+                {valuesArray.map(value => (
                   <button
                     key={value}
-                    onClick={() => onFilterChange(level, isSelected ? null : value)}
-                    className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
-                      isSelected
-                        ? 'bg-violet-500 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
-                    }`}
+                    onClick={() => {
+                      onFilterChange(level, value);
+                      setExpandedLevel(null);
+                    }}
+                    className="block w-full text-left text-xs px-3 py-1.5 hover:bg-violet-50 first:rounded-t-lg last:rounded-b-lg"
                   >
                     {value}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
@@ -613,10 +634,11 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
             for (const level of selectedFilters.keys()) {
               onFilterChange(level, null);
             }
+            setExpandedLevel(null);
           }}
           className="text-xs text-gray-400 hover:text-gray-600"
         >
-          필터 초기화
+          ✕
         </button>
       )}
     </div>
