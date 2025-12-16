@@ -522,67 +522,11 @@ function determineAllowedCharts(seriesCount: number, hasNegativeValues: boolean)
 // UI Components
 // ============================================================
 
-// 분류 테이블 (Step 2 스타일)
-interface ClassificationTableProps {
-  mappings: AccountMapping[];
-}
-
-const ClassificationTable: React.FC<ClassificationTableProps> = ({ mappings }) => {
-  const maxLevel = Math.max(...mappings.map(m => m.path.length), 0);
-
-  return (
-    <div className="overflow-x-auto overflow-y-auto h-full">
-      <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-muted">
-          <tr className="border-b">
-            <th className="text-left py-2 px-2 text-muted-foreground font-medium whitespace-nowrap">원본</th>
-            <th className="text-left py-2 px-2 text-muted-foreground font-medium whitespace-nowrap">단위</th>
-            {Array.from({ length: maxLevel }, (_, i) => (
-              <React.Fragment key={i}>
-                <th className="text-left py-2 px-2 text-violet-500 font-medium whitespace-nowrap bg-violet-50">
-                  기준{i + 1}
-                </th>
-                <th className="text-left py-2 px-2 text-cyan-600 font-medium whitespace-nowrap">
-                  값{i + 1}
-                </th>
-              </React.Fragment>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {mappings.map((mapping, index) => (
-            <tr key={index} className="border-b border-border/50 hover:bg-muted/50">
-              <td className="py-1.5 px-2 font-mono whitespace-nowrap">{mapping.original}</td>
-              <td className="py-1.5 px-2 text-amber-600 whitespace-nowrap">{mapping.unit}</td>
-              {Array.from({ length: maxLevel }, (_, i) => (
-                <React.Fragment key={i}>
-                  <td className="py-1.5 px-2 text-violet-500 whitespace-nowrap bg-violet-50/30">
-                    {mapping.criteriaPath?.[i]?.replace(/별$/, '') || "-"}
-                  </td>
-                  <td className="py-1.5 px-2 text-cyan-600 whitespace-nowrap">
-                    {mapping.path[i] || "-"}
-                  </td>
-                </React.Fragment>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-// 패싯 필터 (개선버전 - 하위레벨 선택시 상위 자동선택, 분류기준명(분류값) 표기)
+// 패싯 필터 (분류기준명만 표시, 분기점만 "기준명(값)" 형식)
 interface FacetFilterProps {
   accountMappings: AccountMapping[];
   selectedFilters: Map<number, string>;
   onFilterChange: (level: number, value: string | null, autoSelectParents?: { level: number; value: string }[]) => void;
-}
-
-// 값과 그 부모 경로를 함께 저장하는 구조
-interface FacetValue {
-  value: string;
-  parentPath: string[];  // 이 값에 도달하기 위한 상위 레벨 값들
 }
 
 const FacetFilter: React.FC<FacetFilterProps> = ({
@@ -590,12 +534,16 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   selectedFilters,
   onFilterChange,
 }) => {
-  // 레벨별 분류기준과 값 추출 (부모 경로 포함)
-  const facets = useMemo(() => {
+  // 현재 선택된 경로에서 다음 레벨로 분기 가능한 값들 추출
+  const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
+
+  // 레벨별 분류기준과 가능한 값들 추출
+  const facetData = useMemo(() => {
     const result: {
       level: number;
       criterion: string;
-      values: Map<string, FacetValue>;  // value -> { value, parentPath }
+      values: { value: string; parentPath: string[] }[];
+      needsBranch: boolean;  // 분기가 필요한지 (값이 2개 이상)
     }[] = [];
 
     for (const mapping of accountMappings) {
@@ -606,7 +554,7 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         const value = path[level];
         if (!criterion || !value) continue;
 
-        // 상위 레벨 필터가 있으면 해당 경로만 표시
+        // 상위 레벨 필터 확인
         let matchesFilter = true;
         for (let i = 0; i < level; i++) {
           const selectedValue = selectedFilters.get(i);
@@ -619,235 +567,121 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
 
         let facet = result.find(f => f.level === level);
         if (!facet) {
-          facet = { level, criterion, values: new Map() };
+          facet = { level, criterion, values: [], needsBranch: false };
           result.push(facet);
         }
 
-        // 값과 부모 경로 저장
-        if (!facet.values.has(value)) {
-          facet.values.set(value, {
-            value,
-            parentPath: path.slice(0, level),  // 상위 레벨 값들
-          });
+        // 값 추가 (중복 제거)
+        if (!facet.values.find(v => v.value === value)) {
+          facet.values.push({ value, parentPath: path.slice(0, level) });
         }
       }
     }
+
+    // 분기 필요 여부 판단 (값이 2개 이상이면 분기 필요)
+    result.forEach(facet => {
+      facet.needsBranch = facet.values.length > 1;
+    });
 
     result.sort((a, b) => a.level - b.level);
     return result;
   }, [accountMappings, selectedFilters]);
 
-  // 3단계 클릭 시 1,2단계 자동선택 핸들러
-  const handleValueClick = useCallback((level: number, facetValue: FacetValue, isSelected: boolean) => {
-    if (isSelected) {
-      // 선택 해제
+  // 분류기준명 클릭 - 분기 필요하면 드롭다운, 아니면 바로 선택
+  const handleCriterionClick = useCallback((level: number, facet: typeof facetData[0]) => {
+    if (selectedFilters.has(level)) {
+      // 이미 선택됨 - 해제
       onFilterChange(level, null);
-    } else {
-      // 선택 - 상위 레벨 자동 선택
-      const autoSelectParents: { level: number; value: string }[] = [];
-      facetValue.parentPath.forEach((parentValue, idx) => {
-        autoSelectParents.push({ level: idx, value: parentValue });
-      });
-      onFilterChange(level, facetValue.value, autoSelectParents);
+      setExpandedLevel(null);
+    } else if (facet.needsBranch) {
+      // 분기 필요 - 드롭다운 토글
+      setExpandedLevel(expandedLevel === level ? null : level);
+    } else if (facet.values.length === 1) {
+      // 값이 1개 - 바로 선택 (상위 레벨 자동 선택)
+      const val = facet.values[0];
+      const autoSelectParents = val.parentPath.map((pv, idx) => ({ level: idx, value: pv }));
+      onFilterChange(level, val.value, autoSelectParents);
+      setExpandedLevel(null);
     }
+  }, [selectedFilters, onFilterChange, expandedLevel]);
+
+  // 값 선택
+  const handleValueSelect = useCallback((level: number, value: string, parentPath: string[]) => {
+    const autoSelectParents = parentPath.map((pv, idx) => ({ level: idx, value: pv }));
+    onFilterChange(level, value, autoSelectParents);
+    setExpandedLevel(null);
   }, [onFilterChange]);
 
-  if (facets.length === 0) return null;
+  if (facetData.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      {facets.map(({ level, criterion, values }) => {
-        const selectedValue = selectedFilters.get(level);
-        const valuesArray = Array.from(values.values()).sort((a, b) => a.value.localeCompare(b.value));
-        const criterionName = criterion.replace(/별$/, '');
+    <div className="space-y-1">
+      {/* 분류 경로 표시 - 분류기준명(선택값) 형식 */}
+      <div className="flex items-center gap-1 flex-wrap">
+        {facetData.map(({ level, criterion, values, needsBranch }, idx) => {
+          const selectedValue = selectedFilters.get(level);
+          const criterionName = criterion.replace(/별$/, '');
 
-        return (
-          <div key={level} className="flex items-center gap-2 flex-wrap">
-            {/* 분류기준명 클릭 가능 - 해당 레벨 전체 선택/해제 */}
-            <button
-              onClick={() => {
-                // 해당 레벨이 선택되어 있으면 해제, 아니면 첫 번째 값 선택
-                if (selectedValue) {
-                  onFilterChange(level, null);
-                } else if (valuesArray.length > 0) {
-                  handleValueClick(level, valuesArray[0], false);
-                }
-              }}
-              className={`text-xs font-medium min-w-[60px] px-2 py-0.5 rounded transition-colors ${
-                selectedValue
-                  ? 'bg-violet-100 text-violet-700'
-                  : 'text-violet-600 hover:bg-violet-50'
-              }`}
-            >
-              {criterionName}:
-            </button>
-            <div className="flex flex-wrap gap-1">
-              {valuesArray.map(facetValue => {
-                const isSelected = selectedValue === facetValue.value;
-                // 분류기준명(분류값) 형식으로 표시 - 부모가 있을 때만
-                const displayLabel = level > 0 && facetValue.parentPath.length > 0
-                  ? `${facetValue.parentPath[facetValue.parentPath.length - 1]}(${facetValue.value})`
-                  : facetValue.value;
+          // 이전 레벨 분기값 (분기점 표시용)
+          const prevSelectedValue = level > 0 ? selectedFilters.get(level - 1) : null;
 
-                return (
-                  <button
-                    key={facetValue.value}
-                    onClick={() => handleValueClick(level, facetValue, isSelected)}
-                    className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
-                      isSelected
-                        ? 'bg-violet-500 text-white'
-                        : 'bg-muted text-muted-foreground hover:bg-violet-100 hover:text-violet-700'
-                    }`}
-                  >
-                    {displayLabel}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })}
+          // 표시 레이블: 분기가 있었으면 "기준명(분기값)" 형식
+          const displayLabel = prevSelectedValue && level > 0
+            ? `${criterionName}(${prevSelectedValue})`
+            : criterionName;
 
-      {/* 선택된 필터 경로 표시 */}
-      {selectedFilters.size > 0 && (
-        <div className="flex items-center gap-2 pt-1 border-t border-border/50">
-          <span className="text-xs text-muted-foreground">선택:</span>
-          <div className="flex items-center gap-1">
-            {Array.from(selectedFilters.entries())
-              .sort(([a], [b]) => a - b)
-              .map(([level, value], idx, arr) => (
-                <React.Fragment key={level}>
-                  <span className="text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">
-                    {value}
-                  </span>
-                  {idx < arr.length - 1 && <span className="text-xs text-muted-foreground">›</span>}
-                </React.Fragment>
-              ))}
-          </div>
+          return (
+            <React.Fragment key={level}>
+              {idx > 0 && <span className="text-xs text-muted-foreground">›</span>}
+              <div className="relative">
+                <button
+                  onClick={() => handleCriterionClick(level, { level, criterion, values, needsBranch })}
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    selectedValue
+                      ? 'bg-violet-500 text-white'
+                      : needsBranch
+                        ? 'bg-muted text-foreground hover:bg-violet-100'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {selectedValue ? `${displayLabel}:${selectedValue}` : displayLabel}
+                  {needsBranch && !selectedValue && <span className="ml-1">▼</span>}
+                </button>
+
+                {/* 드롭다운 */}
+                {expandedLevel === level && needsBranch && (
+                  <div className="absolute top-full left-0 mt-1 bg-card border rounded-lg shadow-lg z-10 min-w-[120px]">
+                    {values.sort((a, b) => a.value.localeCompare(b.value)).map(({ value, parentPath }) => (
+                      <button
+                        key={value}
+                        onClick={() => handleValueSelect(level, value, parentPath)}
+                        className="block w-full text-left text-xs px-3 py-1.5 hover:bg-muted first:rounded-t-lg last:rounded-b-lg"
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </React.Fragment>
+          );
+        })}
+
+        {/* 초기화 버튼 */}
+        {selectedFilters.size > 0 && (
           <button
             onClick={() => {
               for (const level of selectedFilters.keys()) {
                 onFilterChange(level, null);
               }
+              setExpandedLevel(null);
             }}
-            className="text-xs text-muted-foreground hover:text-foreground ml-auto"
+            className="text-xs text-muted-foreground hover:text-foreground ml-2"
           >
-            초기화
+            ✕
           </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// 시나리오 후보 카드 (sectorbook ScenarioCandidateCard 스타일)
-interface ScenarioCandidateCardProps {
-  candidate: ScenarioCandidate;
-  isChartSelected: boolean;
-  onChartSelect: () => void;
-}
-
-const ScenarioCandidateCard: React.FC<ScenarioCandidateCardProps> = ({
-  candidate,
-  isChartSelected,
-  onChartSelect,
-}) => {
-  const [expanded, setExpanded] = useState(false);
-  const { scenario } = candidate;
-  const spec = scenario?.spec;
-
-  return (
-    <div
-      onClick={onChartSelect}
-      className={`rounded-lg border transition-all cursor-pointer ${
-        isChartSelected
-          ? 'bg-cyan-50 border-cyan-400 shadow-md ring-2 ring-cyan-300'
-          : 'bg-card border-border shadow-sm hover:bg-muted/50'
-      }`}
-    >
-      <div className="flex items-center justify-between p-3 hover:bg-cyan-50/50">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-green-500">✓</span>
-          <button
-            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-            className="p-0.5 hover:bg-muted rounded"
-          >
-            {expanded ? '▼' : '▶'}
-          </button>
-          <span className="font-medium text-sm">{candidate.name}</span>
-          <span className="text-xs text-muted-foreground">|</span>
-          <span className="text-xs text-muted-foreground">{candidate.series.length}개 항목</span>
-          <span className="text-xs text-muted-foreground">|</span>
-          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
-            {candidate.units.join(", ")}
-          </span>
-          {candidate.units.length > 1 && (
-            <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded">
-              이중축 필요
-            </span>
-          )}
-          <span className="text-xs bg-cyan-100 text-cyan-700 px-2 py-0.5 rounded">
-            {scenario?.data.length || 0} rows
-          </span>
-          {spec && (
-            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
-              추천: {spec.recommendedChart}
-            </span>
-          )}
-          {isChartSelected && (
-            <span className="text-xs bg-cyan-500 text-white px-2 py-0.5 rounded">
-              차트 표시중
-            </span>
-          )}
-        </div>
+        )}
       </div>
-
-      {expanded && (
-        <div className="border-t bg-muted/30">
-          {/* 명세 정보 */}
-          {spec && (
-            <div className="p-3 border-b text-xs">
-              <h5 className="font-semibold text-muted-foreground mb-2">📊 명세</h5>
-              <div className="mb-2">
-                <span className="text-muted-foreground">데이터 특성: </span>
-                <span>
-                  {spec.dataProfile.seriesCount}개 시리즈 · {spec.dataProfile.timePointCount}개 시점
-                  {spec.dataProfile.hasNegativeValues && " · 음수포함"}
-                  {spec.dataProfile.hasOutliers && " · 이상치"}
-                </span>
-              </div>
-              <div className="mb-2">
-                <span className="text-muted-foreground block mb-1">허용 차트:</span>
-                <div className="flex flex-wrap gap-1">
-                  {spec.allowedCharts.map((chart) => (
-                    <span
-                      key={chart}
-                      className={`px-1.5 py-0.5 rounded ${
-                        chart === spec.recommendedChart
-                          ? 'bg-purple-200 text-purple-800 font-medium'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {chart}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {/* 시리즈 목록 */}
-          <div className="p-3 text-xs">
-            <span className="text-muted-foreground block mb-1">포함 시리즈:</span>
-            <div className="flex flex-wrap gap-1">
-              {candidate.series.map((s, i) => (
-                <span key={i} className="bg-cyan-100 text-cyan-700 px-1.5 py-0.5 rounded">
-                  {s}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1122,55 +956,8 @@ export default function App() {
 
       {/* 메인 */}
       <div className="flex-1 flex min-h-0">
-        {/* 좌측: 시나리오 패널 */}
-        <div className="w-[360px] flex-shrink-0 flex flex-col border-r bg-muted/20 overflow-hidden">
-          {/* 계정항목 분류 (Step 2) */}
-          <div className="flex-shrink-0 border-b">
-            <div className="px-4 py-2 flex items-center justify-between">
-              <h4 className="text-sm font-semibold">계정항목 분류</h4>
-              <span className="text-xs text-muted-foreground">{accountMappings.length}개</span>
-            </div>
-            <div className="h-32 overflow-hidden">
-              <ClassificationTable mappings={accountMappings} />
-            </div>
-          </div>
-
-          {/* 피봇 시나리오 (Step 3) */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="px-4 py-2 border-b flex items-center justify-between">
-              <h4 className="text-sm font-semibold">피봇 시나리오</h4>
-              <div className="flex items-center gap-2">
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                  {selectedFilters.size > 0
-                    ? `${filteredScenarios.length}/${scenarioCandidates.length}개`
-                    : `${scenarioCandidates.length}개`
-                  } 완료
-                </span>
-              </div>
-            </div>
-
-            {/* 시나리오 목록 */}
-            <div className="flex-1 overflow-auto p-3 space-y-1.5 min-h-0">
-              {filteredScenarios.map((candidate) => (
-                <ScenarioCandidateCard
-                  key={candidate.id}
-                  candidate={candidate}
-                  isChartSelected={selectedScenarioId === candidate.id}
-                  onChartSelect={() => setSelectedScenarioId(candidate.id)}
-                />
-              ))}
-
-              {filteredScenarios.length === 0 && selectedFilters.size > 0 && (
-                <div className="text-center py-4 text-xs text-muted-foreground">
-                  선택한 필터에 해당하는 시나리오가 없습니다
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 중앙: 차트 */}
-        <div className="flex-1 min-w-0 flex flex-col border-r">
+        {/* 차트 */}
+        <div className="flex-1 min-w-0 flex flex-col">
           <div className="px-4 py-3 border-b">
             <h3 className="font-medium text-sm">{selectedScenario?.name || "차트"}</h3>
             {selectedScenario && (
