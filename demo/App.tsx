@@ -587,9 +587,8 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
       const criteria: { name: string; values: string[]; isActive: boolean; isDim: boolean }[] = [];
       for (const [criterion, values] of criterionMap.entries()) {
         const isActive = selectedLevel === level && selectedCriterion === criterion;
-        // dim 조건: 같은 레벨에 다른 기준이 활성화됨, 또는 하위 레벨
-        const isDim = (selectedLevel !== null && selectedLevel < level) ||
-                      (selectedLevel === level && selectedCriterion !== null && selectedCriterion !== criterion);
+        // dim 없음 - 모든 분류기준 자유롭게 선택 가능
+        const isDim = false;
         criteria.push({
           name: criterion,
           values: Array.from(values).sort(),
@@ -628,14 +627,11 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
             return (
               <button
                 key={name}
-                onClick={() => !isDim && onCriterionSelect(level, name)}
-                disabled={isDim}
+                onClick={() => onCriterionSelect(level, name)}
                 className={`text-xs px-2 py-0.5 rounded transition-colors ${
                   isActive
                     ? 'bg-violet-500 text-white'
-                    : isDim
-                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                      : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
+                    : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
                 }`}
               >
                 {displayText}
