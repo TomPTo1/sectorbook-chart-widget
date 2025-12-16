@@ -522,11 +522,11 @@ function determineAllowedCharts(seriesCount: number, hasNegativeValues: boolean)
 // UI Components
 // ============================================================
 
-// 패싯 필터 (분류기준명만 표시, 분기점만 "기준명(값)" 형식)
+// 패싯 필터 (sectorbook PivotWidget.tsx 동일 구현)
 interface FacetFilterProps {
   accountMappings: AccountMapping[];
   selectedFilters: Map<number, string>;
-  onFilterChange: (level: number, value: string | null, autoSelectParents?: { level: number; value: string }[]) => void;
+  onFilterChange: (level: number, value: string | null) => void;
 }
 
 const FacetFilter: React.FC<FacetFilterProps> = ({
@@ -534,17 +534,9 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
   selectedFilters,
   onFilterChange,
 }) => {
-  // 현재 선택된 경로에서 다음 레벨로 분기 가능한 값들 추출
-  const [expandedLevel, setExpandedLevel] = useState<number | null>(null);
-
-  // 레벨별 분류기준과 가능한 값들 추출
-  const facetData = useMemo(() => {
-    const result: {
-      level: number;
-      criterion: string;
-      values: { value: string; parentPath: string[] }[];
-      needsBranch: boolean;  // 분기가 필요한지 (값이 2개 이상)
-    }[] = [];
+  // 레벨별 분류기준과 값 추출
+  const facets = useMemo(() => {
+    const result: { level: number; criterion: string; values: Set<string> }[] = [];
 
     for (const mapping of accountMappings) {
       const { criteriaPath, path } = mapping;
@@ -554,7 +546,7 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         const value = path[level];
         if (!criterion || !value) continue;
 
-        // 상위 레벨 필터 확인
+        // 상위 레벨 필터가 적용된 경우, 해당 경로와 일치하는지 확인
         let matchesFilter = true;
         for (let i = 0; i < level; i++) {
           const selectedValue = selectedFilters.get(i);
@@ -565,123 +557,68 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
         }
         if (!matchesFilter) continue;
 
+        // 해당 레벨의 facet 찾거나 생성
         let facet = result.find(f => f.level === level);
         if (!facet) {
-          facet = { level, criterion, values: [], needsBranch: false };
+          facet = { level, criterion, values: new Set() };
           result.push(facet);
         }
-
-        // 값 추가 (중복 제거)
-        if (!facet.values.find(v => v.value === value)) {
-          facet.values.push({ value, parentPath: path.slice(0, level) });
-        }
+        facet.values.add(value);
       }
     }
-
-    // 분기 필요 여부 판단 (값이 2개 이상이면 분기 필요)
-    result.forEach(facet => {
-      facet.needsBranch = facet.values.length > 1;
-    });
 
     result.sort((a, b) => a.level - b.level);
     return result;
   }, [accountMappings, selectedFilters]);
 
-  // 분류기준명 클릭 - 분기 필요하면 드롭다운, 아니면 바로 선택
-  const handleCriterionClick = useCallback((level: number, facet: typeof facetData[0]) => {
-    if (selectedFilters.has(level)) {
-      // 이미 선택됨 - 해제
-      onFilterChange(level, null);
-      setExpandedLevel(null);
-    } else if (facet.needsBranch) {
-      // 분기 필요 - 드롭다운 토글
-      setExpandedLevel(expandedLevel === level ? null : level);
-    } else if (facet.values.length === 1) {
-      // 값이 1개 - 바로 선택 (상위 레벨 자동 선택)
-      const val = facet.values[0];
-      const autoSelectParents = val.parentPath.map((pv, idx) => ({ level: idx, value: pv }));
-      onFilterChange(level, val.value, autoSelectParents);
-      setExpandedLevel(null);
-    }
-  }, [selectedFilters, onFilterChange, expandedLevel]);
-
-  // 값 선택
-  const handleValueSelect = useCallback((level: number, value: string, parentPath: string[]) => {
-    const autoSelectParents = parentPath.map((pv, idx) => ({ level: idx, value: pv }));
-    onFilterChange(level, value, autoSelectParents);
-    setExpandedLevel(null);
-  }, [onFilterChange]);
-
-  if (facetData.length === 0) return null;
+  if (facets.length === 0) return null;
 
   return (
-    <div className="space-y-1">
-      {/* 분류 경로 표시 - 분류기준명(선택값) 형식 */}
-      <div className="flex items-center gap-1 flex-wrap">
-        {facetData.map(({ level, criterion, values, needsBranch }, idx) => {
-          const selectedValue = selectedFilters.get(level);
-          const criterionName = criterion.replace(/별$/, '');
+    <div className="space-y-2">
+      {facets.map(({ level, criterion, values }) => {
+        const selectedValue = selectedFilters.get(level);
+        const valuesArray = Array.from(values).sort();
 
-          // 이전 레벨 분기값 (분기점 표시용)
-          const prevSelectedValue = level > 0 ? selectedFilters.get(level - 1) : null;
+        return (
+          <div key={level} className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium text-violet-600 min-w-[60px]">
+              {criterion.replace(/별$/, '')}:
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {valuesArray.map(value => {
+                const isSelected = selectedValue === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => onFilterChange(level, isSelected ? null : value)}
+                    className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
+                      isSelected
+                        ? 'bg-violet-500 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-violet-100 hover:text-violet-700'
+                    }`}
+                  >
+                    {value}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
-          // 표시 레이블: 분기가 있었으면 "기준명(분기값)" 형식
-          const displayLabel = prevSelectedValue && level > 0
-            ? `${criterionName}(${prevSelectedValue})`
-            : criterionName;
-
-          return (
-            <React.Fragment key={level}>
-              {idx > 0 && <span className="text-xs text-muted-foreground">›</span>}
-              <div className="relative">
-                <button
-                  onClick={() => handleCriterionClick(level, { level, criterion, values, needsBranch })}
-                  className={`text-xs px-2 py-1 rounded transition-colors ${
-                    selectedValue
-                      ? 'bg-violet-500 text-white'
-                      : needsBranch
-                        ? 'bg-muted text-foreground hover:bg-violet-100'
-                        : 'bg-muted/50 text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  {selectedValue ? `${displayLabel}:${selectedValue}` : displayLabel}
-                  {needsBranch && !selectedValue && <span className="ml-1">▼</span>}
-                </button>
-
-                {/* 드롭다운 */}
-                {expandedLevel === level && needsBranch && (
-                  <div className="absolute top-full left-0 mt-1 bg-card border rounded-lg shadow-lg z-10 min-w-[120px]">
-                    {values.sort((a, b) => a.value.localeCompare(b.value)).map(({ value, parentPath }) => (
-                      <button
-                        key={value}
-                        onClick={() => handleValueSelect(level, value, parentPath)}
-                        className="block w-full text-left text-xs px-3 py-1.5 hover:bg-muted first:rounded-t-lg last:rounded-b-lg"
-                      >
-                        {value}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </React.Fragment>
-          );
-        })}
-
-        {/* 초기화 버튼 */}
-        {selectedFilters.size > 0 && (
-          <button
-            onClick={() => {
-              for (const level of selectedFilters.keys()) {
-                onFilterChange(level, null);
-              }
-              setExpandedLevel(null);
-            }}
-            className="text-xs text-muted-foreground hover:text-foreground ml-2"
-          >
-            ✕
-          </button>
-        )}
-      </div>
+      {/* 필터 초기화 버튼 */}
+      {selectedFilters.size > 0 && (
+        <button
+          onClick={() => {
+            for (const level of selectedFilters.keys()) {
+              onFilterChange(level, null);
+            }
+          }}
+          className="text-xs text-gray-400 hover:text-gray-600"
+        >
+          필터 초기화
+        </button>
+      )}
     </div>
   );
 };
@@ -765,10 +702,14 @@ export default function App() {
     return found || filteredScenarios[0] || null;
   }, [scenarioCandidates, selectedScenarioId, filteredScenarios]);
 
-  // 첫 렌더링 시 첫 시나리오 선택
+  // 필터 변경 또는 첫 렌더링 시 첫 번째 필터링된 시나리오 선택
   useEffect(() => {
-    if (!selectedScenarioId && filteredScenarios.length > 0) {
-      setSelectedScenarioId(filteredScenarios[0].id);
+    if (filteredScenarios.length > 0) {
+      // 현재 선택된 시나리오가 필터링된 목록에 없으면 첫 번째로 변경
+      const currentInFiltered = filteredScenarios.find(s => s.id === selectedScenarioId);
+      if (!currentInFiltered) {
+        setSelectedScenarioId(filteredScenarios[0].id);
+      }
     }
   }, [filteredScenarios, selectedScenarioId]);
 
@@ -847,30 +788,19 @@ export default function App() {
     return expandSeriesColors(baseColors, seriesFields.length);
   }, [themeColors.seriesColors, seriesFields.length]);
 
-  // 콜백들 - 3단계 클릭 시 1,2단계 자동선택 지원
-  const handleFilterChange = useCallback((
-    level: number,
-    value: string | null,
-    autoSelectParents?: { level: number; value: string }[]
-  ) => {
+  // 필터 변경 핸들러 (sectorbook 동일)
+  const handleFilterChange = useCallback((level: number, value: string | null) => {
     setSelectedFilters(prev => {
       const next = new Map(prev);
-
       if (value === null) {
-        // 선택 해제 - 해당 레벨과 하위 레벨 모두 해제
         next.delete(level);
+        // 하위 레벨 필터도 모두 해제
         for (const key of next.keys()) {
           if (key > level) next.delete(key);
         }
       } else {
-        // 선택 - 상위 레벨 자동 선택
-        if (autoSelectParents && autoSelectParents.length > 0) {
-          for (const parent of autoSelectParents) {
-            next.set(parent.level, parent.value);
-          }
-        }
         next.set(level, value);
-        // 하위 레벨 해제
+        // 하위 레벨 필터 해제 (상위가 변경되면 하위는 무효화)
         for (const key of next.keys()) {
           if (key > level) next.delete(key);
         }
