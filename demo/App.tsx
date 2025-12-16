@@ -224,7 +224,14 @@ function seededRandom(seed: number) {
 // ============================================================
 interface GeneratedData {
   accountMappings: AccountMapping[];
-  scenarioCandidates: ScenarioCandidate[];
+  scenarioCandidates: ExtendedScenarioCandidate[];
+}
+
+// 확장된 ScenarioCandidate 타입을 미리 선언 (실제 정의는 아래에)
+interface ExtendedScenarioCandidate extends ScenarioCandidate {
+  level: number;
+  criterionName: string;
+  parentValues: string[];
 }
 
 function generateDataFromClassificationTree(seed: number): GeneratedData {
@@ -288,8 +295,8 @@ function generateDataFromClassificationTree(seed: number): GeneratedData {
 function generateScenarioCandidatesFromMappings(
   mappings: AccountMapping[],
   random: () => number
-): ScenarioCandidate[] {
-  const scenarios: ScenarioCandidate[] = [];
+): ExtendedScenarioCandidate[] {
+  const scenarios: ExtendedScenarioCandidate[] = [];
   let idCounter = 1;
 
   if (mappings.length === 0) return scenarios;
@@ -298,6 +305,7 @@ function generateScenarioCandidatesFromMappings(
   interface CriterionGroup {
     criterionPath: string[];
     level: number;
+    criterionName: string;
     parentValuePath: string[];
     seriesValues: Set<string>;
     seriesMappings: Map<string, AccountMapping[]>;
@@ -334,6 +342,7 @@ function generateScenarioCandidatesFromMappings(
         groups.set(groupKey, {
           criterionPath: criterionPathUpToLevel,
           level,
+          criterionName: criterion,
           parentValuePath,
           seriesValues: new Set(),
           seriesMappings: new Map(),
@@ -352,7 +361,7 @@ function generateScenarioCandidatesFromMappings(
 
   // 각 그룹에서 시나리오 생성 (시리즈가 1개 이상이면 표시)
   for (const [groupKey, group] of groups.entries()) {
-    const { criterionPath, level, parentValuePath, seriesValues, seriesMappings } = group;
+    const { criterionPath, level, criterionName, parentValuePath, seriesValues, seriesMappings } = group;
 
     if (seriesValues.size < 1) continue;
 
@@ -399,6 +408,9 @@ function generateScenarioCandidatesFromMappings(
     scenarios.push({
       id: `scenario-${idCounter++}`,
       name: scenarioName,
+      level,
+      criterionName,
+      parentValues: parentValuePath,
       units: allUnits,
       accountGroup,
       series,
@@ -687,19 +699,21 @@ export default function App() {
   // 선택된 분류기준에 해당하는 시나리오 찾기
   const selectedScenario = useMemo(() => {
     if (selectedLevel === null || selectedCriterion === null) {
-      // 기본: 첫 번째 시나리오 (가장 깊은 레벨)
-      return scenarioCandidates[0] || null;
+      // 기본: 가장 깊은 레벨의 첫 번째 시나리오
+      const maxLevel = Math.max(...scenarioCandidates.map(s => s.level), 0);
+      return scenarioCandidates.find(s => s.level === maxLevel) || scenarioCandidates[0] || null;
     }
 
-    // 해당 레벨의 분류기준과 일치하는 시나리오 찾기
+    // 해당 레벨과 분류기준명이 일치하는 시나리오 찾기
     const matching = scenarioCandidates.find(candidate => {
-      // 시나리오의 레벨과 기준명 확인
-      const criterionName = selectedCriterion.replace(/별$/, '');
-      return candidate.name.includes(criterionName) ||
-             candidate.aggregationLevel.includes(criterionName);
+      return candidate.level === selectedLevel && candidate.criterionName === selectedCriterion;
     });
 
-    return matching || scenarioCandidates[0] || null;
+    // 일치하는게 없으면 레벨만 일치하는 것
+    if (matching) return matching;
+
+    const levelMatching = scenarioCandidates.find(candidate => candidate.level === selectedLevel);
+    return levelMatching || scenarioCandidates[0] || null;
   }, [scenarioCandidates, selectedLevel, selectedCriterion]);
 
   // 첫 렌더링 시 기본 분류기준 선택 (마지막 레벨)
@@ -833,8 +847,8 @@ export default function App() {
   // 새 데이터 생성
   const regenerateData = () => {
     setDataSeed(Date.now());
-    setSelectedScenarioId(null);
-    setSelectedFilters(new Map());
+    setSelectedLevel(null);
+    setSelectedCriterion(null);
   };
 
   const spec = selectedScenario?.scenario?.spec;
@@ -877,7 +891,7 @@ export default function App() {
           </div>
           <div className="flex-1 min-h-0 p-4">
             {selectedScenario?.scenario ? (
-              <ErrorBoundary key={selectedScenarioId}>
+              <ErrorBoundary key={selectedScenario.id}>
                 <ChartWidget
                   data={selectedScenario.scenario.data}
                   seriesFields={seriesFields}
