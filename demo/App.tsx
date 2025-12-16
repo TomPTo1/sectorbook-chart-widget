@@ -1149,17 +1149,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 패싯 필터 */}
-            {accountMappings.length > 0 && (
-              <div className="px-3 py-2 border-b bg-muted/30">
-                <FacetFilter
-                  accountMappings={accountMappings}
-                  selectedFilters={selectedFilters}
-                  onFilterChange={handleFilterChange}
-                />
-              </div>
-            )}
-
             {/* 시나리오 목록 */}
             <div className="flex-1 overflow-auto p-3 space-y-1.5 min-h-0">
               {filteredScenarios.map((candidate) => (
@@ -1219,8 +1208,18 @@ export default function App() {
           </div>
         </div>
 
-        {/* 우측: 레전드 패널 */}
+        {/* 우측: 패싯 필터 + 레전드 패널 */}
         <div className="w-[300px] flex-shrink-0 flex flex-col bg-card">
+          {/* 패싯 필터 */}
+          {accountMappings.length > 0 && (
+            <div className="flex-shrink-0 px-3 py-2 border-b bg-muted/30">
+              <FacetFilter
+                accountMappings={accountMappings}
+                selectedFilters={selectedFilters}
+                onFilterChange={handleFilterChange}
+              />
+            </div>
+          )}
           <ChartLegendPanel
             layout="sidePanel"
             seriesFields={seriesFields}
