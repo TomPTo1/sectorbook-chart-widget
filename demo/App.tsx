@@ -575,59 +575,72 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
 
   if (facets.length === 0) return null;
 
+  // 레벨별로 그룹화
+  const levelGroups = useMemo(() => {
+    const groups = new Map<number, typeof facets>();
+    for (const facet of facets) {
+      if (!groups.has(facet.level)) {
+        groups.set(facet.level, []);
+      }
+      groups.get(facet.level)!.push(facet);
+    }
+    return Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
+  }, [facets]);
+
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {facets.map(({ level, criterion, values }) => {
-        const selectedValue = selectedFilters.get(level);
-        const valuesArray = Array.from(values).sort();
-        const criterionName = criterion.replace(/별$/, '');
-        const isExpanded = expandedLevel === level;
+    <div className="space-y-1">
+      {levelGroups.map(([level, levelFacets]) => (
+        <div key={level} className="flex items-center gap-1 flex-wrap">
+          <span className="text-xs text-gray-400 w-12">L{level + 1}:</span>
+          {levelFacets.map(({ criterion, values }) => {
+            const selectedValue = selectedFilters.get(level);
+            const valuesArray = Array.from(values).sort();
+            const criterionName = criterion.replace(/별$/, '');
+            const isExpanded = expandedLevel === level;
 
-        return (
-          <div key={level} className="relative">
-            <button
-              onClick={() => {
-                if (selectedValue) {
-                  // 이미 선택됨 - 해제
-                  onFilterChange(level, null);
-                  setExpandedLevel(null);
-                } else {
-                  // 드롭다운 토글
-                  setExpandedLevel(isExpanded ? null : level);
-                }
-              }}
-              className={`text-xs px-2 py-1 rounded transition-colors ${
-                selectedValue
-                  ? 'bg-violet-500 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-violet-100'
-              }`}
-            >
-              {selectedValue ? `${criterionName}(${selectedValue})` : criterionName}
-              {!selectedValue && valuesArray.length > 1 && <span className="ml-1 opacity-50">▼</span>}
-            </button>
-
-            {/* 드롭다운 */}
-            {isExpanded && !selectedValue && valuesArray.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg z-10 min-w-[100px] max-h-[200px] overflow-y-auto">
-                {valuesArray.map(value => (
-                  <button
-                    key={value}
-                    onClick={() => {
-                      onFilterChange(level, value);
+            return (
+              <div key={criterion} className="relative">
+                <button
+                  onClick={() => {
+                    if (selectedValue) {
+                      onFilterChange(level, null);
                       setExpandedLevel(null);
-                    }}
-                    className="block w-full text-left text-xs px-3 py-1.5 hover:bg-violet-50 first:rounded-t-lg last:rounded-b-lg"
-                  >
-                    {value}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+                    } else {
+                      setExpandedLevel(isExpanded ? null : level);
+                    }
+                  }}
+                  className={`text-xs px-2 py-0.5 rounded transition-colors ${
+                    selectedValue
+                      ? 'bg-violet-500 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-violet-100'
+                  }`}
+                >
+                  {selectedValue ? `${criterionName}(${selectedValue})` : criterionName}
+                  {!selectedValue && valuesArray.length > 1 && <span className="ml-1 opacity-50">▼</span>}
+                </button>
 
-      {/* 필터 초기화 버튼 */}
+                {isExpanded && !selectedValue && valuesArray.length > 0 && (
+                  <div className="absolute top-full left-0 mt-1 bg-white border rounded-lg shadow-lg z-10 min-w-[100px] max-h-[200px] overflow-y-auto">
+                    {valuesArray.map(value => (
+                      <button
+                        key={value}
+                        onClick={() => {
+                          onFilterChange(level, value);
+                          setExpandedLevel(null);
+                        }}
+                        className="block w-full text-left text-xs px-3 py-1.5 hover:bg-violet-50 first:rounded-t-lg last:rounded-b-lg"
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+
       {selectedFilters.size > 0 && (
         <button
           onClick={() => {
@@ -638,7 +651,7 @@ const FacetFilter: React.FC<FacetFilterProps> = ({
           }}
           className="text-xs text-gray-400 hover:text-gray-600"
         >
-          ✕
+          필터 초기화
         </button>
       )}
     </div>
